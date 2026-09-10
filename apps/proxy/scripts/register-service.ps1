@@ -31,7 +31,9 @@
 
 $Mode = "S4U"
 
-$ProxyDir = "C:\Users\micha\OneDrive\Desktop\projects\pieces-android\apps\proxy"
+# $PSScriptRoot is this file's own directory (apps/proxy/scripts) - deriving
+# ProxyDir from it instead of a hardcoded absolute path ensures portability.
+$ProxyDir = Split-Path -Parent $PSScriptRoot
 $TokenFile = Join-Path $ProxyDir ".bearer-token"
 
 if (-not (Test-Path $TokenFile)) {

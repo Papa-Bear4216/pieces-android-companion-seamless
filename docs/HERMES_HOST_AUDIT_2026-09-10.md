@@ -1,7 +1,7 @@
 # hermes-host — infrastructure audit
 
 **Date:** 2026-09-10
-**Host:** `hermes-host` (Tailscale `100.75.20.88`, GCP internal `10.142.0.2`, public `199.66.159.93` / seen via ACME as `64.29.17.x` = Tailscale funnel/relay egress)
+**Host:** `hermes-host` (Tailscale `100.64.0.1`, GCP internal `10.0.0.2`, public `198.51.100.1` / seen via ACME as `198.51.100.x` = Tailscale funnel/relay egress)
 **Trigger:** post token-rotation, asked to audit the space and evaluate the hardware
 **Method:** read-only SSH (`lscpu`, `free`, `df`, `docker ...`, `ss`, `ps`, `systemctl`, GCP metadata). Nothing modified.
 
@@ -55,8 +55,13 @@ All three: `restart: unless-stopped`, no healthchecks defined, zero restarts, no
 
 ### Host-level services (not in Docker)
 
+<<<<<<< HEAD
 - **`tailscaled`** 1.102.2 — up, `hermes-host` online, direct connection to `galaxybook3-360` (your PC) at `199.66.159.93:41641`. This is the path the gateway uses to reach the Plan A proxy.
 - **A second Node app on `:3000`** — `node /home/bearappdev6969/api-server/dist/index.js`, run under **PM2** (`God Daemon`, PM2 v7.0.1), user `bearappdev6969`, up since Aug 13, 91 min CPU. Caddy proxies `api.dysfunctionjunction.xyz` → `host.docker.internal:3000` to it. This is the `bear-house-classic` / FamilyOS API backend — unrelated to pieces, but sharing the box.
+=======
+- **`tailscaled`** 1.102.2 — up, `hermes-host` online, direct connection to client device at `198.51.100.1:41641`. This is the path the gateway uses to reach the Plan A proxy.
+- **A second Node app on `:3000`** — `node /home/<user>/api-server/dist/index.js`, run under **PM2** (`God Daemon`, PM2 v7.0.1), user `<user>`, up since Aug 13, 91 min CPU. Caddy proxies `api.example.com` → `host.docker.internal:3000` to it. This is an auxiliary backend — unrelated to pieces, but sharing the box.
+>>>>>>> 19314e0 (chore(proxy): ignore .venv, refine S4U scheduled-task registration, update host audit)
 - `dockerd` 29.7.2, `sshd`, `systemd-resolved`, `snapd`.
 
 ### Listening ports
@@ -66,8 +71,13 @@ All three: `restart: unless-stopped`, no healthchecks defined, zero restarts, no
 | 22 | `0.0.0.0` + `[::]` | sshd | GCP firewall-gated |
 | 80, 443 | `0.0.0.0` + `[::]` | docker-proxy → caddy | public |
 | **8788** | **`0.0.0.0`** | node (pieces-gateway) | **see issue 3** |
+<<<<<<< HEAD
 | 3000 | `0.0.0.0` | node (bear api, PM2) | via Caddy only, but bound wide |
 | 46496 | `100.75.20.88` | tailscaled | tailnet |
+=======
+| 3000 | `0.0.0.0` | node (api, PM2) | via Caddy only, but bound wide |
+| 46496 | `100.64.0.1` | tailscaled | tailnet |
+>>>>>>> 19314e0 (chore(proxy): ignore .venv, refine S4U scheduled-task registration, update host audit)
 | 53 | `127.0.0.53/54` | systemd-resolved | local |
 
 ---
@@ -80,26 +90,45 @@ All three: `restart: unless-stopped`, no healthchecks defined, zero restarts, no
 
 Host has been up 46 days. Running kernel `6.17.0-1021` has a known successor staged. The `libc6` update in particular means **every long-running process is using an unpatched libc**.
 
+<<<<<<< HEAD
 **Recommendation:** schedule a reboot. All three containers are `restart: unless-stopped` and the `bear` API is under PM2 (also auto-restarts), so a reboot should self-heal — but verify the PM2 resurrect list is saved (`pm2 save` was run) and that `pieces-gateway`'s tsx build still works after the newer kernel. Do it during a window when a few minutes of Plan B / FamilyOS downtime is acceptable. ~3-5 min of downtime.
+=======
+**Recommendation:** schedule a reboot. All three containers are `restart: unless-stopped` and the auxiliary API is under PM2 (also auto-restarts), so a reboot should self-heal — but verify the PM2 resurrect list is saved (`pm2 save` was run) and that `pieces-gateway`'s tsx build still works after the newer kernel. Do it during a window when a few minutes of Plan B downtime is acceptable. ~3-5 min of downtime.
+>>>>>>> 19314e0 (chore(proxy): ignore .venv, refine S4U scheduled-task registration, update host audit)
 
 ### 2. Caddy ACME failing for 30 days — Medium
 
 Caddy has tried **142 times over 30 days** (`elapsed: 2592366s`, `max_duration: 2592000s` = its 30-day ceiling) to get certs for:
 
+<<<<<<< HEAD
 - `dysfunctionjunction.xyz` (apex)
 - `api.dysfunctionjunction.xyz`
 - `bear-house-classic.vercel.app`
+=======
+- `example.com` (apex)
+- `api.example.com`
+- `app.example.com`
+>>>>>>> 19314e0 (chore(proxy): ignore .venv, refine S4U scheduled-task registration, update host audit)
 
 Every attempt fails HTTP-01 with `404` on the ACME challenge path, then a **second bug**: `caching certificate after obtaining it: open /data/caddy/certificates/.../[domain].key: no such file or directory`.
 
 Two distinct problems:
 
+<<<<<<< HEAD
 1. **Challenge 404s** — the ACME validator (`64.29.17.x`) hits `http://<domain>/.well-known/acme-challenge/...` and gets 404. For `bear-house-classic.vercel.app` this is expected and **should be removed from the Caddyfile** — that hostname is served by Vercel, not this box; Caddy will never validate it. For the two `dysfunctionjunction.xyz` names, either DNS for those isn't pointing at this host's public IP, or inbound :80 isn't reaching Caddy from the validator's path (the `64.29.17.x` source suggests traffic is arriving via a Tailscale funnel / relay, not direct — if :80 isn't funnel-exposed the HTTP-01 challenge can't complete).
 2. **Cert-cache write failure** — even a *successful* obtain would fail to persist because the `.key` file path doesn't exist. Suggests `caddy_data` volume permissions or a partial/corrupted `/data/caddy/certificates` tree. Worth an `ls -la` inside the volume.
 
 **Impact:** `pieces.dysfunctionjunction.xyz` is **not** in the failing list — so the Plan B pieces path has a valid cert and works. This is degrading the *FamilyOS* / hermes-bridge domains, not pieces. Still, 142 failed ACME jobs is log noise and a latent risk if the working certs ever need renewal through the same broken cache path.
 
 **Recommendation:** (a) drop `bear-house-classic.vercel.app` from the Caddyfile entirely; (b) check DNS A records for `dysfunctionjunction.xyz` + `api.` and whether :80 is publicly reachable; (c) inspect the `caddy_data` volume's `certificates/` tree for the permission/path problem.
+=======
+1. **Challenge 404s** — the ACME validator (`198.51.100.x`) hits `http://<domain>/.well-known/acme-challenge/...` and gets 404. For `app.example.com` this is expected and **should be removed from the Caddyfile** — that hostname is served elsewhere, not this box; Caddy will never validate it. For the two `example.com` names, either DNS for those isn't pointing at this host's public IP, or inbound :80 isn't reaching Caddy from the validator's path (the `198.51.100.x` source suggests traffic is arriving via a relay, not direct — if :80 isn't exposed the HTTP-01 challenge can't complete).
+2. **Cert-cache write failure** — even a *successful* obtain would fail to persist because the `.key` file path doesn't exist. Suggests `caddy_data` volume permissions or a partial/corrupted `/data/caddy/certificates` tree. Worth an `ls -la` inside the volume.
+
+**Impact:** `pieces.example.com` is **not** in the failing list — so the Plan B pieces path has a valid cert and works. This is degrading the auxiliary domains, not pieces. Still, 142 failed ACME jobs is log noise and a latent risk if the working certs ever need renewal through the same broken cache path.
+
+**Recommendation:** (a) drop `app.example.com` from the Caddyfile entirely; (b) check DNS A records for `example.com` + `api.` and whether :80 is publicly reachable; (c) inspect the `caddy_data` volume's `certificates/` tree for the permission/path problem.
+>>>>>>> 19314e0 (chore(proxy): ignore .venv, refine S4U scheduled-task registration, update host audit)
 
 ### 3. Compose drift: `pieces-gateway` uses `network_mode: host` — Low-Medium
 
@@ -150,16 +179,16 @@ Parent `1113545` is still alive and never reaped these children. Harmless (zombi
 - **Disk pressure** — none. 29 GB free.
 - **CPU** — effectively idle.
 - **systemd** — 0 failed units.
-- **Tailscale** — connected, direct path to your PC.
-- **The pieces.dysfunctionjunction.xyz cert** — valid (not in the ACME failure list).
+- **Tailscale** — connected, direct path to client device.
+- **The pieces.example.com cert** — valid (not in the ACME failure list).
 
 ---
 
 ## Recommended actions, in order
 
-1. **Remove `bear-house-classic.vercel.app` from the Caddyfile** — 2 min, stops a chunk of the ACME failure loop immediately.
+1. **Remove `app.example.com` from the Caddyfile** — 2 min, stops a chunk of the ACME failure loop immediately.
 2. **Reboot the host** during a maintenance window — clears the pending kernel/libc updates, the zombies, and picks up 46 days of drift. Verify containers + PM2 come back.
-3. **Investigate the remaining ACME failures** — DNS A records for `dysfunctionjunction.xyz` + `api.`, inbound :80 reachability, and the `caddy_data` cert-cache path/permission bug.
+3. **Investigate the remaining ACME failures** — DNS A records for `example.com` + `api.`, inbound :80 reachability, and the `caddy_data` cert-cache path/permission bug.
 4. **Reconcile the compose file** — either document the `network_mode: host` decision in the repo or revert to the bridge design; update the snippet either way. Verify GCP firewall denies :8788 and :3000.
 5. **`docker builder prune`** — recover 5.4 GB when convenient.
 6. **Identify PID 1113545** — the process leaking git zombies.
