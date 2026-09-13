@@ -129,6 +129,14 @@ export function summarizeTelemetry(e: TelemetryEvent): string {
   const raw = e.telemetry ?? "";
   const summaryLines: string[] = [];
 
+  // On-device Gemini Nano summary (set by triageQueue.ts)
+  const markerAt = raw.indexOf(ON_DEVICE_SUMMARY_MARKER);
+  if (markerAt !== -1) {
+    const summary = raw.slice(markerAt + ON_DEVICE_SUMMARY_MARKER.length).trim();
+    summaryLines.push(`- On-device summary: ${summary}`);
+    return `${header}\n\nsummary:\n${summaryLines.join("\n")}`;
+  }
+
   // Best-effort parsing for meminfo dumpsys output (Shizuku diagnostics path
   // has no role tagging, so this stays a special case rather than folding
   // into parseScreenStructure).

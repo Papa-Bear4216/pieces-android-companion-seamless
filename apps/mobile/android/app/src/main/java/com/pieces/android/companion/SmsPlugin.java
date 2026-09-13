@@ -235,11 +235,8 @@ public class SmsPlugin extends Plugin {
                         lastScannedDate = date;
 
                         if (!allow.contains(normalize(address))) {
-                            if (kept >= limit) { hasMore = true; break; }
                             continue;
                         }
-                        if (kept >= limit) { hasMore = true; break; }
-                        kept++;
 
                         String id = c.getString(0);
                         String body = c.getString(2) != null ? c.getString(2) : "";
@@ -263,6 +260,12 @@ public class SmsPlugin extends Plugin {
                         m.put("date", date);
                         m.put("direction", direction);
                         messages.put(m);
+
+                        kept++;
+                        if (kept >= limit) {
+                            hasMore = c.moveToNext();
+                            break;
+                        }
                     }
                     // If we scanned the full cap without breaking, there may be more.
                     if (!hasMore && scanned >= scanCap) hasMore = true;

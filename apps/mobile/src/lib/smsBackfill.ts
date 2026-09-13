@@ -111,6 +111,7 @@ export async function runSmsBackfill(
         package: "com.android.messaging",
         app_label: "Messages",
         timestamp: new Date(m.date).toISOString(),
+        triaged: false,
       });
       ingested++;
       since = Math.max(since, m.date);

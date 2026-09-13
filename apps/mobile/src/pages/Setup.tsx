@@ -197,6 +197,7 @@ export default function Setup() {
           ? `Done — ${ingested} messages from allowlisted contacts queued for PiecesOS.`
           : `${ingested} queued so far — run again to continue (large history is paced across runs).`
       );
+      flushUsageEvents();
     } catch (e) {
       setSmsError(e instanceof Error ? e.message : String(e));
     }
@@ -620,7 +621,7 @@ export default function Setup() {
                 .map((c) => {
                   const on = c.numbers.length > 0 && c.numbers.every((n) => smsAllow.has(n));
                   return (
-                    <label key={c.name} className="toggle-row" style={{ padding: "4px 0" }}>
+                    <label key={`${c.name}:${c.numbers.join(",")}`} className="toggle-row" style={{ padding: "4px 0" }}>
                       <input
                         type="checkbox"
                         checked={on}

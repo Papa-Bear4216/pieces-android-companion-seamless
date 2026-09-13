@@ -23,6 +23,7 @@ export async function triageQueue(): Promise<void> {
     const event = queue[i];
     if (event.type !== "system_telemetry" || event.screen !== "background") continue;
     if (event.triaged !== undefined) continue; // already attempted, success or fallback
+    if (event.telemetry?.startsWith("SMS ")) continue;
 
     const triaged = await tryOnDeviceTriage(event.app_label ?? "", extractRawText(event.telemetry));
     if (triaged.ok) {
