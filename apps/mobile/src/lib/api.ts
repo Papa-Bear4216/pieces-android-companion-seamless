@@ -26,23 +26,8 @@ export class HomeNodeUnreachableError extends Error {
 // no client-side abort. This client-side timeout ensures every call fails
 // closed instead of leaving the UI stuck on "Checking…" forever.
 const CLIENT_FETCH_TIMEOUT_MS = 10000;
-// /mobile/recent/assets proxies to PiecesOS's /assets, which the proxy itself
-// allows up to 30s for (a real store scan on a non-trivial asset count is
-// legitimately slow — see ASSETS_TIMEOUT_MS in apps/proxy/src/server.ts).
-// The client timeout must exceed that, or it aborts requests the server was
-// still on track to complete successfully.
 const ASSETS_CLIENT_FETCH_TIMEOUT_MS = 35000;
-// /mobile/ask falls back to a local Ollama call (grounded in Pieces data)
-// when PiecesOS itself can't answer — CPU-bound local generation measured
-// 23.8s-63.9s in testing against OLLAMA_TIMEOUT_MS=90000 in
-// apps/proxy/src/ollama-fallback.ts. Must exceed that ceiling or the client
-// aborts requests the server was still on track to complete.
 const ASK_CLIENT_FETCH_TIMEOUT_MS = 100000;
-// /mobile/summaries makes one /workstream_summary/{id} call plus up to a few
-// parallel /annotation/{id} calls PER summary (see apps/proxy/src/summaries.ts) —
-// measured 0.4s for 21 summaries against the local PiecesOS install, but that's
-// with an unusually low PIECES_BASE_URL round-trip; give real headroom for a
-// slower network path rather than assume the default 10s always covers it.
 const SUMMARIES_CLIENT_FETCH_TIMEOUT_MS = 30000;
 
 // Plan A (LAN) -> Plan B (remote gateway) failover, merged from shizuku-monitor.
@@ -111,6 +96,49 @@ async function authedFetch(path: string, init?: RequestInit): Promise<Response> 
   }
 
   throw lastError;
+  let lastError: unknown = null;
+
+  for (let i = 0; i < targets.length; i++) {
+    const target = targets[i];
+    // Probe LAN with a fast 2.5s timeout if a remote fallback exists
+    const isProbe = targets.length > 1 && i === 0 && target.mode === "lan" && !path.startsWith("/mobile/ask");
+    const currentTimeout = isProbe ? 2500 : timeoutMs;
+
+    try {
+      const res = await fetch(`${target.baseUrl}${path}`, {
+        ...init,
+        headers: {
+          ...init?.headers,
+          Authorization: `Bearer ${target.token}`,
+        },
+        signal: AbortSignal.timeout(currentTimeout),
+      });
+
+      if (res.status === 503) {
+        const body = await res.json().catch(() => null);
+        throw new HomeNodeUnreachableError(body?.reason ?? body?.error);
+      }
+
+      // If target returned auth failure (401/403) or server error (>= 500) and another target exists, fail over
+      if (i < targets.length - 1 && (res.status === 401 || res.status === 403 || res.status >= 500)) {
+        lastError = new Error(`Target ${target.baseUrl} failed with status ${res.status}`);
+        continue;
+      }
+
+      return res;
+    } catch (err) {
+      lastError = err;
+      if (err instanceof HomeNodeUnreachableError && i === targets.length - 1) {
+        throw err;
+      }
+    }
+  }
+
+  if (lastError instanceof Error && lastError.name === "TimeoutError") {
+    throw new HomeNodeUnreachableError("Request timed out reaching the proxy.");
+  }
+  if (lastError instanceof Error) throw lastError;
+  throw new HomeNodeUnreachableError();
 }
 
 export type AskResult =

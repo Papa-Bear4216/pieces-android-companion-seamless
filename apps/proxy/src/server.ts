@@ -19,6 +19,9 @@ const MEM0_API_KEY = process.env.MEM0_API_KEY;
 const MEM0_USER_ID = process.env.MEM0_USER_ID ?? "pieces-android-user";
 const mem0Client = MEM0_API_KEY ? new MemoryClient({ apiKey: MEM0_API_KEY }) : null;
 
+const REGISTRY_INGEST_URL = process.env.REGISTRY_INGEST_URL;
+const REGISTRY_AUTH_TOKEN = process.env.REGISTRY_AUTH_TOKEN;
+
 async function addToMem0(content: string) {
   if (!mem0Client) return;
   try {
@@ -44,6 +47,9 @@ async function pipeToRegistryApp(batch: TelemetryEvent[], packageName: string, a
       const t0 = new Date(batch[0].timestamp).getTime();
       const t1 = new Date(batch[batch.length - 1].timestamp).getTime();
       if (!isNaN(t0) && !isNaN(t1)) usageDurationMs = Math.max(0, Math.abs(t1 - t0));
+      if (!isNaN(t0) && !isNaN(t1)) {
+        usageDurationMs = Math.max(0, Math.abs(t1 - t0));
+      }
     }
     const payload = {
       collector: process.env.REGISTRY_COLLECTOR_TYPE || "shizuku",
@@ -53,6 +59,11 @@ async function pipeToRegistryApp(batch: TelemetryEvent[], packageName: string, a
       rawIdentity: packageName,
       idempotencyKey,
       payload: { usageCount: batch.length, usageDurationMs, windowHours: 1 },
+      payload: {
+        usageCount: batch.length,
+        usageDurationMs,
+        windowHours: 1,
+      },
     };
     await fetch(REGISTRY_INGEST_URL, {
       method: "POST",
