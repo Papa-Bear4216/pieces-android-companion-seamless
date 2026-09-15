@@ -22,6 +22,8 @@ const USAGE_FLUSH_INTERVAL_MS = 5 * 60 * 1000;
 // file/asset origin with no server-side routing, so path-based routes would
 // 404 on refresh/deep link. Same class of problem bear-house-classic solved
 // with apiUrl() for API calls — this is the routing equivalent.
+import Layout from "./components/Layout";
+
 export default function App() {
   const [shizukuOffline, setShizukuOffline] = useState(false);
 
@@ -113,23 +115,24 @@ export default function App() {
   }, []);
 
   return (
-    <>
-      {shizukuOffline && (
-        <div className="banner">
-          <span>⚠️ Shizuku is offline. Restart it via Wireless Debugging (your device may have rebooted).</span>
-          <button onClick={() => setShizukuOffline(false)}>Dismiss</button>
-        </div>
-      )}
-      <HashRouter>
-        <Routes>
+    <HashRouter>
+      <Routes>
+        <Route
+          element={
+            <Layout
+              shizukuOffline={shizukuOffline}
+              onDismissShizuku={() => setShizukuOffline(false)}
+            />
+          }
+        >
           <Route path="/" element={<Navigate to="/setup" replace />} />
           <Route path="/setup" element={<Setup />} />
           <Route path="/status" element={<Status />} />
           <Route path="/ask" element={<Ask />} />
           <Route path="/recent" element={<Recent />} />
           <Route path="/search" element={<Search />} />
-        </Routes>
-      </HashRouter>
-    </>
+        </Route>
+      </Routes>
+    </HashRouter>
   );
 }

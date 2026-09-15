@@ -9,6 +9,7 @@ import {
 } from "../lib/api";
 import { recordEvent } from "../lib/usage";
 import { flushUsageEvents } from "../lib/flush";
+import { RecentIcon, RefreshIcon, ChevronDownIcon, ChevronRightIcon, AlertIcon } from "../components/Icons";
 
 type State =
   | { kind: "loading" }
@@ -51,26 +52,42 @@ export default function Recent() {
 
   return (
     <div className="page">
-      <h1>What Got Done</h1>
-      <p className="hint">PiecesOS's own workflow summaries — not a raw activity feed.</p>
+      <div className="page-header">
+        <div className="page-header-top">
+          <h1>What Got Done</h1>
+          <button className="secondary pill" onClick={load} title="Refresh summaries">
+            <RefreshIcon size={14} /> Refresh
+          </button>
+        </div>
+        <p className="hint">PiecesOS AI workstream rollups — summarizing your coding sessions and projects.</p>
+      </div>
 
-      {state.kind === "loading" && <p>Loading…</p>}
+      {state.kind === "loading" && (
+        <div className="card" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span className="status-pulse-live" />
+          <p className="hint" style={{ margin: 0 }}>Syncing workstream rollups from PiecesOS…</p>
+        </div>
+      )}
 
       {state.kind === "not-configured" && (
-        <>
-          <p className="status-error">Not set up yet.</p>
+        <div className="card panel-danger">
+          <p className="status-error" style={{ marginBottom: 12 }}>Not set up yet.</p>
           <button onClick={() => navigate("/setup")}>Go to Setup</button>
-        </>
+        </div>
       )}
 
       {state.kind === "home-offline" && (
-        <>
-          <p className="status-error">Home PC is offline or unreachable. {state.message}</p>
-          <button onClick={load}>Retry</button>
+        <div className="card panel-danger">
+          <div className="card-row" style={{ marginBottom: 6 }}>
+            <span className="status-error">Home PC is offline or unreachable</span>
+            <AlertIcon size={16} color="var(--error)" />
+          </div>
+          <p className="hint" style={{ marginBottom: 12 }}>{state.message}</p>
+          <button onClick={load} style={{ alignSelf: "flex-start", marginBottom: 12 }}>Retry</button>
 
           {state.stale && (
-            <>
-              <p className="hint setup-note">
+            <div>
+              <p className="hint setup-note" style={{ margin: "8px 0" }}>
                 Showing the last synced copy from {new Date(state.stale.at).toLocaleString()}:
               </p>
               <ul>
@@ -78,49 +95,59 @@ export default function Recent() {
                   <li key={s.id} className="card faded">
                     <div className="card-row">
                       <span className="card-title">{s.name}</span>
-                      <span className="card-meta">{s.created}</span>
+                      <span className="badge">{s.created}</span>
                     </div>
                   </li>
                 ))}
               </ul>
-            </>
+            </div>
           )}
-        </>
+        </div>
       )}
 
       {state.kind === "error" && (
-        <>
-          <p className="status-error">{state.message}</p>
-          <button onClick={load}>Retry</button>
-        </>
+        <div className="card panel-danger">
+          <p className="status-error" style={{ marginBottom: 12 }}>{state.message}</p>
+          <button onClick={load} style={{ alignSelf: "flex-start" }}>Retry</button>
+        </div>
       )}
 
       {state.kind === "loaded" && (
         <>
-          <button className="secondary" onClick={load} style={{ marginBottom: 12 }}>
-            Refresh
-          </button>
-          {state.summaries.length === 0 && <p className="hint">No workflow summaries yet.</p>}
+          {state.summaries.length === 0 && (
+            <div className="card" style={{ textAlign: "center", padding: "32px 16px" }}>
+              <RecentIcon size={32} style={{ color: "var(--text-dim)", margin: "0 auto 10px" }} />
+              <p className="hint" style={{ margin: 0 }}>No workflow summaries recorded yet.</p>
+            </div>
+          )}
+
           <ul>
-            {state.summaries.map((s) => (
-              <li key={s.id} className="card clickable" onClick={() => setExpanded(expanded === s.id ? null : s.id)}>
-                <div className="card-row">
-                  <span className="card-title">{s.name}</span>
-                  <span className="card-meta">{s.created}</span>
-                </div>
-                {expanded === s.id && <div className="card-body">{s.text}</div>}
-              </li>
-            ))}
+            {state.summaries.map((s) => {
+              const isExpanded = expanded === s.id;
+              return (
+                <li
+                  key={s.id}
+                  className="card clickable"
+                  onClick={() => setExpanded(isExpanded ? null : s.id)}
+                >
+                  <div className="card-row">
+                    <span className="card-title">{s.name}</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span className="badge">{s.created}</span>
+                      {isExpanded ? (
+                        <ChevronDownIcon size={14} style={{ color: "var(--text-dim)" }} />
+                      ) : (
+                        <ChevronRightIcon size={14} style={{ color: "var(--text-dim)" }} />
+                      )}
+                    </div>
+                  </div>
+                  {isExpanded && <div className="card-body">{s.text}</div>}
+                </li>
+              );
+            })}
           </ul>
         </>
       )}
-
-      <nav className="tabbar">
-        <button onClick={() => navigate("/setup")}>Setup</button>
-        <button onClick={() => navigate("/status")}>Status</button>
-        <button onClick={() => navigate("/ask")}>Ask</button>
-        <button onClick={() => navigate("/search")}>Search</button>
-      </nav>
     </div>
   );
 }

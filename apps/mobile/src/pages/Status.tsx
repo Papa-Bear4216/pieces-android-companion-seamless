@@ -7,6 +7,8 @@ import { isShizukuToolkitEnabled, isScreenContextEnabled } from "../lib/config";
 import { onPassiveCapture, getLastPassiveCapture, startPassiveCaptureListener } from "../lib/passiveCapture";
 import { withPlayCategoryFallback } from "../lib/playCategories";
 import { registerPlugin } from "@capacitor/core";
+import { Switch } from "../components/Switch";
+import { RefreshIcon } from "../components/Icons";
 
 const ShizukuMonitor = registerPlugin<any>('ShizukuMonitor');
 const AccessibilityScanner = registerPlugin<any>('AccessibilityScanner');
@@ -265,50 +267,77 @@ export default function Status() {
 
   return (
     <div className="page">
-      <h1>Status</h1>
+      <div className="page-header">
+        <div className="page-header-top">
+          <h1>System Status</h1>
+          <button className="secondary pill" onClick={load} title="Refresh connection">
+            <RefreshIcon size={14} /> Refresh
+          </button>
+        </div>
+        <p className="hint">Live bridge health and diagnostics between Android and your PC's PiecesOS.</p>
+      </div>
 
-      {state.kind === "loading" && <p>Checking…</p>}
+      {state.kind === "loading" && (
+        <div className="card">
+          <p className="hint" style={{ margin: 0 }}>Checking PiecesOS connection…</p>
+        </div>
+      )}
 
       {state.kind === "not-configured" && (
-        <>
-          <p className="status-error">Not set up yet.</p>
+        <div className="card">
+          <p className="status-error" style={{ marginBottom: 12 }}>Not set up yet.</p>
           <button onClick={() => navigate("/setup")}>Go to Setup</button>
-        </>
+        </div>
       )}
 
       {state.kind === "home-offline" && (
-        <>
-          <p className="status-error">Home PC is offline or unreachable. {state.message}</p>
-          <button onClick={load}>Retry</button>
+        <div className="card panel-danger">
+          <p className="status-error" style={{ marginBottom: 8 }}>Home PC is offline or unreachable. {state.message}</p>
+          <button onClick={load} style={{ alignSelf: "flex-start", marginBottom: 8 }}>Retry</button>
 
           {state.stale && (
-            <p className="hint setup-note">
+            <p className="hint setup-note" style={{ margin: 0 }}>
               Last known: PiecesOS {state.stale.version}, as of {new Date(state.stale.at).toLocaleString()}.
             </p>
           )}
-        </>
+        </div>
       )}
 
       {state.kind === "error" && (
-        <>
-          <p className="status-error">{state.message}</p>
-          <button onClick={load}>Retry</button>
-        </>
+        <div className="card panel-danger">
+          <p className="status-error" style={{ marginBottom: 12 }}>{state.message}</p>
+          <button onClick={load} style={{ alignSelf: "flex-start" }}>Retry</button>
+        </div>
       )}
 
       {state.kind === "ok" && (
         <>
-          <p className="status-ok">PiecesOS reachable</p>
-          <dl>
-            <dt>Health</dt>
-            <dd>{state.health}</dd>
-            <dt>Version</dt>
-            <dd>{state.version}</dd>
-          </dl>
-          <button onClick={load}>Refresh</button>
+          <div className="status-hero-card">
+            <div className="card-row">
+              <div className="status-ok">
+                <span className="status-pulse-live" />
+                <span style={{ fontSize: 16, fontWeight: 700 }}>PiecesOS Connected</span>
+              </div>
+              <span className="badge success">Active</span>
+            </div>
+            <div className="metrics-grid">
+              <div className="metric-box">
+                <div className="metric-label">Health</div>
+                <div className="metric-val">{state.health}</div>
+              </div>
+              <div className="metric-box">
+                <div className="metric-label">Version</div>
+                <div className="metric-val">{state.version}</div>
+              </div>
+              <div className="metric-box">
+                <div className="metric-label">Allowlist</div>
+                <div className="metric-val">{allowlist.size} apps</div>
+              </div>
+            </div>
+          </div>
 
           {!toolkitEnabled && !contextEnabled && (
-            <p className="hint setup-note" style={{ marginTop: 20 }}>
+            <p className="hint setup-note">
               Screen context and the Shizuku toolkit are both off. Enable either in Setup.
             </p>
           )}
@@ -551,23 +580,20 @@ export default function Status() {
                 );
               })()}
 
-              <div className="panel panel-danger" style={{ marginTop: 12 }}>
-                <label className={`toggle-row ${allowlist.size === 0 ? "disabled" : ""}`}>
-                  <input
-                    type="checkbox"
-                    checked={passiveMode}
-                    disabled={allowlist.size === 0}
-                    onChange={(e) => handleTogglePassiveMode(e.target.checked)}
-                  />
-                  <strong style={{ color: 'var(--error)' }}>Passive mode (advanced)</strong>
-                </label>
-                <p className="hint" style={{ margin: "6px 0 0" }}>
-                  Instead of only capturing when you tap "Scan Screen Text," automatically
-                  push screen text from allowed apps to PiecesOS whenever it changes and
-                  settles for ~2 seconds. This runs continuously in the background while an
-                  allowed app is open — not a single snapshot. Requires at least one app
-                  selected above.
-                </p>
+              <div className="panel panel-danger" style={{ marginTop: 14 }}>
+                <Switch
+                  checked={passiveMode}
+                  disabled={allowlist.size === 0}
+                  onChange={handleTogglePassiveMode}
+                  danger={true}
+                  label={<strong>Passive mode (advanced)</strong>}
+                  description={
+                    <span>
+                      Push screen text from allowed apps to PiecesOS continuously whenever it changes and settles for ~2s.
+                      {allowlist.size === 0 && " (Select at least one app above to enable)"}
+                    </span>
+                  }
+                />
 
                 {showPassiveConfirm && (
                   <div className="confirm-box">
@@ -599,22 +625,16 @@ export default function Status() {
                 )}
 
                 {passiveMode && lastPassiveCapture && (
-                  <p className="status-ok" style={{ fontSize: 11, marginTop: 6, fontWeight: 400 }}>
-                    Last passive capture: {lastPassiveCapture.pkg} at {new Date(lastPassiveCapture.at).toLocaleTimeString()}
-                  </p>
+                  <div className="status-ok" style={{ fontSize: 12, marginTop: 8, fontWeight: 500 }}>
+                    <span className="status-pulse-live" />
+                    <span>Last passive capture: {lastPassiveCapture.pkg} at {new Date(lastPassiveCapture.at).toLocaleTimeString()}</span>
+                  </div>
                 )}
               </div>
             </div>
           )}
         </>
       )}
-
-      <nav className="tabbar">
-        <button onClick={() => navigate("/setup")}>Setup</button>
-        <button onClick={() => navigate("/ask")}>Ask</button>
-        <button onClick={() => navigate("/recent")}>Recent</button>
-        <button onClick={() => navigate("/search")}>Search</button>
-      </nav>
     </div>
   );
 }

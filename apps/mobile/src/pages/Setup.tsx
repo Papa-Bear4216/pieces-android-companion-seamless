@@ -1,10 +1,10 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router";
 import { registerPlugin } from "@capacitor/core";
 import { BarcodeScanner } from "@capacitor-mlkit/barcode-scanning";
 
 const ShizukuMonitor = registerPlugin<any>('ShizukuMonitor');
 const AccessibilityScanner = registerPlugin<any>('AccessibilityScanner');
+
 import {
   getProxyBaseUrl, getProxyToken, setProxyBaseUrl, setProxyToken,
   getRemoteGatewayUrl, getRemoteGatewayToken, setRemoteGatewayUrl, setRemoteGatewayToken,
@@ -25,9 +25,10 @@ import {
   smsPermissions, grantSmsViaShizuku, runSmsBackfill, resetSmsBackfillToRecent,
   listSmsContacts, getSmsAllowlist, setSmsAllowlist, type SmsContact,
 } from "../lib/smsBackfill";
+import { Switch } from "../components/Switch";
+import { ScanIcon, CheckIcon } from "../components/Icons";
 
 export default function Setup() {
-  const navigate = useNavigate();
   // Plan A (LAN)
   const [baseUrl, setBaseUrl] = useState("");
   const [token, setToken] = useState("");
@@ -35,13 +36,6 @@ export default function Setup() {
   const [remoteUrl, setRemoteUrl] = useState("");
   const [remoteToken, setRemoteToken] = useState("");
   const [checking, setChecking] = useState(false);
-  // "ok" = full end-to-end chain verified (proxy/gateway -> PiecesOS).
-  // "server-only" = the proxy/gateway process answers but PiecesOS itself
-  // doesn't - previously this was indistinguishable from "ok", since the
-  // save flow only ever checked checkProxyHealth()'s unauthenticated
-  // /mobile/health, which proves nothing about the home PC. Found in
-  // practice 2026-08-29: Setup said "Connected" while Status simultaneously
-  // said "Home PC is offline."
   const [result, setResult] = useState<"idle" | "ok" | "server-only" | "unreachable">("idle");
   const [scanError, setScanError] = useState<string | null>(null);
   const [shizukuToolkit, setShizukuToolkit] = useState(false);
@@ -244,9 +238,6 @@ export default function Setup() {
       console.warn("[Shizuku] setToolkitEnabled failed", e);
     }
     if (next) {
-      // First-enable: try to turn on the accessibility service right away
-      // rather than waiting for the next app launch. Best-effort — if
-      // Shizuku isn't granted yet, the Status tab will surface that.
       try {
         await ShizukuMonitor.enableAccessibilityService();
       } catch (e) {
@@ -255,22 +246,12 @@ export default function Setup() {
     }
   }
 
-  // Runs AFTER the shallow checkProxyHealth() pass and AFTER saving, since
-  // getStatus() reads from the just-saved config, not from function
-  // arguments - this proves the FULL chain (proxy/gateway -> PiecesOS), not
-  // just that the gateway process itself is up. Never throws: a deep-check
-  // failure downgrades the already-"ok" shallow result to "server-only"
-  // rather than failing setup entirely, since the shallow health check
-  // already succeeded and the config is already saved correctly.
   async function deepCheckAfterSave(): Promise<"ok" | "server-only"> {
     try {
       await getStatus();
       return "ok";
     } catch (e) {
       if (e instanceof HomeNodeUnreachableError) return "server-only";
-      // Any other error here (unexpected shape, etc.) is still evidence
-      // the deep chain isn't fully healthy - treat it the same way rather
-      // than silently claiming "ok".
       return "server-only";
     }
   }
@@ -289,18 +270,11 @@ export default function Setup() {
 
       const { barcodes } = await BarcodeScanner.scan();
       const raw = barcodes[0]?.rawValue;
-      if (!raw) {
-        // User backed out of the scanner without capturing a code - not an
-        // error worth surfacing, just a no-op.
-        return;
-      }
+      if (!raw) return;
 
       const { baseUrl: scannedUrl, token: scannedToken } = parseConnectionQrPayload(raw);
       setBaseUrl(scannedUrl);
       setToken(scannedToken);
-      // Mirrors handleTestAndSave's own test-then-save sequencing, so a
-      // successful scan behaves exactly like a successful manual entry +
-      // tap of "Test & Save" - no separate save step for the user to forget.
       setChecking(true);
       setResult("idle");
       try {
@@ -311,12 +285,6 @@ export default function Setup() {
         }
         await setProxyBaseUrl(scannedUrl);
         await setProxyToken(scannedToken);
-        // Deep check (up to ~35s on a retry) deliberately happens while
-        // `checking` is still true - button stays disabled and shows
-        // "Checking…" for the FULL flow, not just the fast shallow check.
-        // Previously setChecking(false) fired here, which re-enabled the
-        // button and let a second scan start concurrently with this one
-        // still finishing.
         setResult(await deepCheckAfterSave());
         await recordEvent({
           type: "setup_saved",
@@ -337,8 +305,6 @@ export default function Setup() {
     setChecking(true);
     setResult("idle");
 
-    // At least one profile must be fully filled. Prefer to verify Plan A if
-    // it's set; otherwise verify Plan B.
     const planA = baseUrl.trim() && token.trim();
     const planB = remoteUrl.trim() && remoteToken.trim();
     if (!planA && !planB) {
@@ -355,8 +321,6 @@ export default function Setup() {
       return;
     }
 
-    // Save whichever profiles are complete; clear the ones that aren't so a
-    // half-filled profile can't shadow a working one in the failover list.
     await setProxyBaseUrl(planA ? baseUrl.trim() : "");
     await setProxyToken(planA ? token.trim() : "");
     await setRemoteGatewayUrl(planB ? remoteUrl.trim() : "");
@@ -390,26 +354,33 @@ export default function Setup() {
 
   return (
     <div className="page">
-      <h1>Setup</h1>
-      <p className="hint">
-        Fill in <strong>Plan A</strong> for home Wi-Fi, <strong>Plan B</strong> for away, or both —
-        the app tries Plan A first and falls over to Plan B automatically (on timeout, a refused
-        connection, a stale token, or a server error). Either one alone is a valid setup.
-      </p>
+      <div className="page-header">
+        <h1>Setup Bridge</h1>
+        <p className="hint">
+          Connect your Android device to PiecesOS via <strong>Plan A</strong> (LAN proxy at home) or{" "}
+          <strong>Plan B</strong> (remote gateway away). Automatic failover kicks in when away from home.
+        </p>
+      </div>
 
-      <button onClick={handleScanToConnect} disabled={checking}>
-        Scan to Connect
-      </button>
-      <p className="hint setup-note">
-        Fastest option for Plan A: scan a connection code shown by the LAN proxy's companion
-        setup script. Fills in Plan A and saves automatically.
-      </p>
-      {scanError && <p className="status-error">{scanError}</p>}
+      <div className="card" style={{ background: "linear-gradient(135deg, rgba(99,102,241,0.12) 0%, var(--surface) 100%)", marginBottom: 16 }}>
+        <div className="card-row" style={{ marginBottom: 8 }}>
+          <span style={{ fontWeight: 700, fontSize: 15, color: "var(--text)" }}>Instant QR Pairing</span>
+          <span className="badge primary">Fastest</span>
+        </div>
+        <p className="hint" style={{ fontSize: 13, margin: "0 0 14px" }}>
+          Scan the connection QR code generated by the PC proxy script to configure and test automatically.
+        </p>
+        <button onClick={handleScanToConnect} disabled={checking} style={{ width: "100%" }}>
+          <ScanIcon size={18} />
+          {checking ? "Checking…" : "Scan to Connect"}
+        </button>
+        {scanError && <p className="status-error" style={{ marginTop: 10, fontSize: 13 }}>{scanError}</p>}
+      </div>
 
-      <fieldset style={{ border: "1px solid var(--border, #333)", borderRadius: 8, padding: 12, marginTop: 8 }}>
-        <legend><strong>Plan A — home Wi-Fi (LAN proxy)</strong></legend>
+      <fieldset>
+        <legend>Plan A — Home Wi-Fi (LAN Proxy)</legend>
         <label>
-          LAN proxy address
+          LAN Proxy Address
           <input
             type="text"
             placeholder="http://192.168.1.20:8787"
@@ -417,15 +388,19 @@ export default function Setup() {
             onChange={(e) => setBaseUrl(e.target.value)}
           />
         </label>
-        <label>
-          Bearer token (from that PC)
-          <input type="password" placeholder="proxy bearer token" value={token}
-            onChange={(e) => setToken(e.target.value)} />
+        <label style={{ marginBottom: 0 }}>
+          Bearer Token (from PC)
+          <input
+            type="password"
+            placeholder="Proxy bearer token"
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+          />
         </label>
       </fieldset>
 
-      <fieldset style={{ border: "1px solid var(--border, #333)", borderRadius: 8, padding: 12, marginTop: 8 }}>
-        <legend><strong>Plan B — away (remote gateway)</strong></legend>
+      <fieldset>
+        <legend>Plan B — Away (Remote Gateway)</legend>
         <label>
           Gateway URL
           <input
@@ -435,18 +410,21 @@ export default function Setup() {
             onChange={(e) => setRemoteUrl(e.target.value)}
           />
         </label>
-        <label>
-          Device token (from the gateway's enroll command)
-          <input type="password" placeholder="device JWT" value={remoteToken}
-            onChange={(e) => setRemoteToken(e.target.value)} />
+        <label style={{ marginBottom: 4 }}>
+          Device Token (from gateway enroll)
+          <input
+            type="password"
+            placeholder="Device JWT"
+            value={remoteToken}
+            onChange={(e) => setRemoteToken(e.target.value)}
+          />
         </label>
         {(() => {
-          // Gateway tokens are JWTs (365-day expiry, apps/pieces-gateway/src/jwt.ts).
           const info = remoteToken ? decodeJwtForDisplay(remoteToken) : null;
           if (!info?.expiresAt) return null;
           const expired = info.expiresAt.getTime() < Date.now();
           return (
-            <p className={`setup-note ${expired ? "status-error" : "hint"}`}>
+            <p className={`setup-note ${expired ? "status-error" : "hint"}`} style={{ fontSize: 12, margin: "6px 0 0" }}>
               Device token {formatExpiry(info.expiresAt)}
               {expired && " — re-enroll this device on the gateway."}
             </p>
@@ -454,185 +432,175 @@ export default function Setup() {
         })()}
       </fieldset>
 
-      <button
-        onClick={handleTestAndSave}
-        disabled={checking || (!(baseUrl && token) && !(remoteUrl && remoteToken))}
-      >
-        {checking ? "Checking…" : "Test & Save"}
-      </button>
+      <div style={{ marginTop: 16 }}>
+        <button
+          onClick={handleTestAndSave}
+          disabled={checking || (!(baseUrl && token) && !(remoteUrl && remoteToken))}
+          style={{ width: "100%" }}
+        >
+          {checking ? "Testing connection…" : "Test & Save Connection"}
+        </button>
+      </div>
 
-      {result === "ok" && <p className="status-ok">Connected. Saved.</p>}
-      {result === "server-only" && (
-        <>
-          <p className="status-ok">Saved.</p>
-          <p className="status-error">
-            But the server can't reach your home PC right now (it may just be starting up, or
-            genuinely offline). Check Status for details — you don't need to redo Setup, this
-            usually clears on its own.
-          </p>
-        </>
-      )}
-      {result === "unreachable" && <p className="status-error">Could not reach proxy at that address.</p>}
-
-      <div className="panel">
-        <label className="toggle-row">
-          <input
-            type="checkbox"
-            checked={screenContext}
-            onChange={(e) => handleToggleScreenContext(e.target.checked)}
-          />
-          <strong>Enable screen context</strong>
-        </label>
-        <p className="hint" style={{ margin: 0 }}>
-          Off by default. Turning this on lets you pick specific apps (in the Status tab's
-          app picker) whose on-screen text gets captured and sent to PiecesOS as context.
-          No Shizuku required — just Android's standard Accessibility permission, same
-          mechanism screen readers use. You'll need to grant it once in system Settings.
-        </p>
-        {screenContext && (
-          <div>
-            {accessibilityGranted ? (
-              <p className="status-ok" style={{ margin: 0 }}>Accessibility permission granted.</p>
-            ) : (
-              <>
-                <p className="status-error" style={{ margin: "0 0 8px 0" }}>
-                  Accessibility permission not granted yet.
-                </p>
-                <button onClick={() => AccessibilityScanner.openAccessibilitySettings()}>
-                  Open Accessibility Settings
-                </button>
-              </>
-            )}
+      {result === "ok" && (
+        <div className="card" style={{ marginTop: 12, borderLeft: "4px solid var(--ok)" }}>
+          <div className="status-ok">
+            <span className="status-pulse-live" />
+            <span>Connected & Saved successfully.</span>
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      {result === "server-only" && (
+        <div className="card panel-danger" style={{ marginTop: 12 }}>
+          <div className="status-ok" style={{ marginBottom: 4 }}>Saved.</div>
+          <p className="status-error" style={{ fontSize: 13, margin: 0 }}>
+            Server is reachable, but cannot reach your home PC right now. Check Status tab for details.
+          </p>
+        </div>
+      )}
+
+      {result === "unreachable" && (
+        <div className="card panel-danger" style={{ marginTop: 12 }}>
+          <p className="status-error" style={{ margin: 0 }}>Could not reach proxy at the specified address.</p>
+        </div>
+      )}
 
       <div className="panel">
-        <label className="toggle-row">
-          <input
-            type="checkbox"
-            checked={shizukuToolkit}
-            onChange={(e) => handleToggleShizuku(e.target.checked)}
-          />
-          <strong>Enable Shizuku toolkit (advanced)</strong>
-        </label>
-        <p className="hint" style={{ margin: 0 }}>
-          Off by default. Turning this on lets the app run privileged diagnostic commands
-          via Shizuku, and auto-re-enable screen context's Accessibility permission if it
-          gets dropped (e.g. after a reboot) instead of you having to re-grant it manually.
-          Not required for screen context itself — only useful if you want the diagnostics
-          toolkit or the auto-re-enable convenience. Requires the Shizuku app installed and
-          its daemon running.
-        </p>
-      </div>
-
-      <div className="panel">
-        <label className="toggle-row">
-          <input
-            type="checkbox"
-            checked={notifCapture}
-            onChange={(e) => handleToggleNotifCapture(e.target.checked)}
-          />
-          <strong>Capture notifications</strong>
-        </label>
-        <p className="hint" style={{ margin: 0 }}>
-          Off by default. Streams every app's notification previews (texts, chat, email,
-          Slack…) to PiecesOS as they arrive — one live feed across all apps. Preview text
-          only; full message bodies for SMS come from the SMS History section below.
-          Banking / 2FA / password apps are always excluded.
-        </p>
-        {notifCapture && (
-          <div style={{ marginTop: 8 }}>
-            {notifListenerGranted ? (
-              <p className="status-ok" style={{ margin: "0 0 8px 0" }}>
-                Notification access granted.
+        <Switch
+          checked={screenContext}
+          onChange={handleToggleScreenContext}
+          label="Enable screen context"
+          description="Capture on-screen text from allowed apps using Android's standard Accessibility permission."
+        />
+        {screenContext && (
+          <div style={{ paddingTop: 8, borderTop: "1px solid var(--border-subtle)" }}>
+            {accessibilityGranted ? (
+              <p className="status-ok" style={{ fontSize: 13, margin: 0 }}>
+                <CheckIcon size={14} /> Accessibility permission granted.
               </p>
             ) : (
-              <>
-                <p className="status-error" style={{ margin: "0 0 8px 0" }}>
-                  Notification access not granted yet.
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <p className="status-error" style={{ fontSize: 13, margin: 0 }}>
+                  Accessibility permission not granted yet.
                 </p>
-                <button onClick={handleGrantNotifListener} disabled={notifBusy}>
-                  {notifBusy ? "Granting…" : "Grant via Shizuku"}
+                <button className="secondary" onClick={() => AccessibilityScanner.openAccessibilitySettings()}>
+                  Open Accessibility Settings
                 </button>
-                <button
-                  onClick={() => openNotificationListenerSettings()}
-                  style={{ marginLeft: 8 }}
-                >
-                  Open Settings
-                </button>
-              </>
+              </div>
             )}
-            {notifError && <p className="status-error" style={{ margin: "8px 0 0 0" }}>{notifError}</p>}
-            <label className="toggle-row" style={{ marginTop: 8 }}>
-              <input
-                type="checkbox"
-                checked={notifAllApps}
-                onChange={(e) => handleToggleNotifAllApps(e.target.checked)}
-              />
-              <span>Capture from <strong>all</strong> apps (not just the picked ones)</span>
-            </label>
           </div>
         )}
       </div>
 
       <div className="panel">
-        <div className="toggle-row">
-          <strong>SMS history</strong>
+        <Switch
+          checked={shizukuToolkit}
+          onChange={handleToggleShizuku}
+          label="Enable Shizuku toolkit (advanced)"
+          description="Privileged diagnostics and automated accessibility re-arming via wireless debugging."
+        />
+      </div>
+
+      <div className="panel">
+        <Switch
+          checked={notifCapture}
+          onChange={handleToggleNotifCapture}
+          label="Capture notifications"
+          description="Stream incoming notification previews (texts, email, chat) to PiecesOS. Sensitive 2FA apps excluded."
+        />
+        {notifCapture && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, paddingTop: 10, borderTop: "1px solid var(--border-subtle)" }}>
+            {notifListenerGranted ? (
+              <p className="status-ok" style={{ fontSize: 13, margin: 0 }}>
+                <CheckIcon size={14} /> Notification access granted.
+              </p>
+            ) : (
+              <div>
+                <p className="status-error" style={{ fontSize: 13, margin: "0 0 8px" }}>
+                  Notification access not granted yet.
+                </p>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={handleGrantNotifListener} disabled={notifBusy}>
+                    {notifBusy ? "Granting…" : "Grant via Shizuku"}
+                  </button>
+                  <button className="secondary" onClick={() => openNotificationListenerSettings()}>
+                    Open Settings
+                  </button>
+                </div>
+              </div>
+            )}
+            {notifError && <p className="status-error" style={{ fontSize: 12 }}>{notifError}</p>}
+            <Switch
+              checked={notifAllApps}
+              onChange={handleToggleNotifAllApps}
+              label="Capture from all apps"
+              description="Capture across every app rather than only allowlisted apps."
+            />
+          </div>
+        )}
+      </div>
+
+      <div className="panel">
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text)" }}>SMS History & Sync</span>
+          <p className="hint" style={{ margin: 0 }}>
+            Sync and backfill SMS/MMS messages exclusively from contacts you explicitly allow below.
+          </p>
         </div>
-        <p className="hint" style={{ margin: 0 }}>
-          Full text bodies + a backfill of existing SMS/MMS, but only from the contacts you
-          pick below. Everything else — OTP shortcodes, spam, unknown numbers — is left out.
-        </p>
-        <div style={{ marginTop: 8 }}>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, paddingTop: 8 }}>
           {!smsGranted ? (
-            <>
-              <p className="status-error" style={{ margin: "0 0 8px 0" }}>
+            <div>
+              <p className="status-error" style={{ fontSize: 13, margin: "0 0 8px" }}>
                 SMS access not granted yet.
               </p>
               <button onClick={handleGrantSms} disabled={smsBusy}>
                 {smsBusy ? "Granting…" : "Grant via Shizuku"}
               </button>
-            </>
+            </div>
           ) : (
-            <>
-              <p className="status-ok" style={{ margin: "0 0 8px 0" }}>
-                SMS access granted{contactsGranted ? " · contacts readable" : ""}.
-              </p>
-              <p className="hint" style={{ margin: "0 0 8px 0" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div className="status-ok" style={{ fontSize: 13 }}>
+                <CheckIcon size={14} />
+                <span>SMS access granted{contactsGranted ? " · contacts readable" : ""}.</span>
+              </div>
+              <p className="hint" style={{ fontSize: 12, margin: 0 }}>
                 Allowlist: <strong>{smsAllow.size}</strong> number{smsAllow.size === 1 ? "" : "s"} selected.
               </p>
               {!contactsGranted && (
-                <p className="status-error" style={{ margin: "0 0 8px 0" }}>
+                <p className="status-error" style={{ fontSize: 12 }}>
                   Contacts not readable — tap "Grant via Shizuku" again to add READ_CONTACTS.
                 </p>
               )}
-              <button onClick={handleOpenPicker} disabled={smsBusy || !contactsGranted}>
-                Choose contacts
-              </button>
-              <button
-                onClick={handleSmsBackfill}
-                disabled={smsBusy || smsAllow.size === 0}
-                style={{ marginLeft: 8 }}
-              >
-                {smsBusy ? "Backfilling…" : "Backfill now"}
-              </button>
-              <button
-                onClick={handleResetToRecent}
-                disabled={smsBusy || smsAllow.size === 0}
-                style={{ marginLeft: 8 }}
-                title="Jump directly to the last 30 days of messages"
-              >
-                Sync Recent (30d)
-              </button>
-            </>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
+                <button className="secondary" onClick={handleOpenPicker} disabled={smsBusy || !contactsGranted}>
+                  Choose contacts
+                </button>
+                <button
+                  onClick={handleSmsBackfill}
+                  disabled={smsBusy || smsAllow.size === 0}
+                >
+                  {smsBusy ? "Backfilling…" : "Backfill now"}
+                </button>
+                <button
+                  className="secondary"
+                  onClick={handleResetToRecent}
+                  disabled={smsBusy || smsAllow.size === 0}
+                  title="Jump directly to the last 30 days of messages"
+                >
+                  Sync Recent (30d)
+                </button>
+              </div>
+            </div>
           )}
-          {smsResult && <p className="status-ok" style={{ margin: "8px 0 0 0" }}>{smsResult}</p>}
-          {smsError && <p className="status-error" style={{ margin: "8px 0 0 0" }}>{smsError}</p>}
+
+          {smsResult && <p className="status-ok" style={{ fontSize: 13 }}>{smsResult}</p>}
+          {smsError && <p className="status-error" style={{ fontSize: 13 }}>{smsError}</p>}
         </div>
 
         {pickerOpen && (
-          <div style={{ marginTop: 12, borderTop: "1px solid var(--border, #333)", paddingTop: 12 }}>
+          <div className="picker">
             <input
               type="text"
               placeholder="Filter contacts…"
@@ -640,11 +608,11 @@ export default function Setup() {
               onChange={(e) => setContactFilter(e.target.value)}
               style={{ width: "100%", marginBottom: 8 }}
             />
-            <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
+            <div style={{ display: "flex", gap: 8, marginBottom: 10, alignItems: "center" }}>
               <button
                 type="button"
                 className="secondary"
-                style={{ fontSize: "0.75rem", padding: "3px 8px" }}
+                style={{ fontSize: "0.75rem", padding: "4px 10px" }}
                 onClick={() => {
                   const visible = contacts.filter((c) =>
                     c.name.toLowerCase().includes(contactFilter.toLowerCase())
@@ -663,7 +631,7 @@ export default function Setup() {
               <button
                 type="button"
                 className="secondary"
-                style={{ fontSize: "0.75rem", padding: "3px 8px" }}
+                style={{ fontSize: "0.75rem", padding: "4px 10px" }}
                 onClick={() => {
                   const visible = contacts.filter((c) =>
                     c.name.toLowerCase().includes(contactFilter.toLowerCase())
@@ -679,8 +647,8 @@ export default function Setup() {
               >
                 Deselect All
               </button>
-              <span className="hint" style={{ marginLeft: "auto", fontSize: "0.75rem" }}>
-                {contacts.length} contact{contacts.length === 1 ? "" : "s"} (2026 inbound)
+              <span className="hint" style={{ marginLeft: "auto", fontSize: "0.75rem", margin: 0 }}>
+                {contacts.length} contacts
               </span>
             </div>
             <div style={{ maxHeight: 260, overflowY: "auto" }}>
@@ -692,7 +660,7 @@ export default function Setup() {
                 .map((c) => {
                   const on = c.numbers.length > 0 && c.numbers.every((n) => smsAllow.has(n));
                   return (
-                    <label key={`${c.name}:${c.numbers.join(",")}`} className="toggle-row" style={{ padding: "4px 0" }}>
+                    <label key={`${c.name}:${c.numbers.join(",")}`} className="app-row">
                       <input
                         type="checkbox"
                         checked={on}
@@ -708,24 +676,17 @@ export default function Setup() {
                   );
                 })}
             </div>
-            <div style={{ marginTop: 8 }}>
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
               <button onClick={handleSaveAllowlist} disabled={smsBusy}>
                 {smsBusy ? "Saving…" : "Save allowlist"}
               </button>
-              <button onClick={() => setPickerOpen(false)} style={{ marginLeft: 8 }}>
+              <button className="secondary" onClick={() => setPickerOpen(false)}>
                 Cancel
               </button>
             </div>
           </div>
         )}
       </div>
-
-      <nav className="tabbar">
-        <button onClick={() => navigate("/status")}>Status</button>
-        <button onClick={() => navigate("/ask")}>Ask</button>
-        <button onClick={() => navigate("/recent")}>Recent</button>
-        <button onClick={() => navigate("/search")}>Search</button>
-      </nav>
     </div>
   );
 }

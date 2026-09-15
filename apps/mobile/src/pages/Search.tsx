@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router";
 import { semanticSearch, type SearchHit, type SearchSortMode } from "../lib/semanticSearch";
 import { recordEvent } from "../lib/usage";
+import { SearchIcon, ChevronDownIcon, ChevronRightIcon, CloseIcon } from "../components/Icons";
 
 type State =
   | { kind: "idle" }
@@ -20,7 +20,6 @@ function formatHitTime(ts: string): string {
 }
 
 export default function Search() {
-  const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const [sortMode, setSortMode] = useState<SearchSortMode>("hybrid");
   const [state, setState] = useState<State>({ kind: "idle" });
@@ -78,93 +77,160 @@ export default function Search() {
     run(query);
   }
 
+  function clearQuery() {
+    setQuery("");
+    setState({ kind: "idle" });
+  }
+
   return (
     <div className="page">
-      <h1>Search</h1>
-      <p className="hint">Find past activity by meaning — locally captured items plus your home PC's workflow summaries when it's reachable.</p>
+      <div className="page-header">
+        <h1>Search Activity</h1>
+        <p className="hint">
+          Find past activity by meaning — locally captured items plus your home PC's workflow summaries when reachable.
+        </p>
+      </div>
 
-      <div className="card-row" style={{ gap: 8 }}>
-        <input
-          type="search"
-          placeholder="Search your activity…"
-          value={query}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && onSubmit()}
-          style={{ flex: 1 }}
-        />
+      <div className="card-row" style={{ gap: 8, marginBottom: 12 }}>
+        <div style={{ position: "relative", flex: 1 }}>
+          <input
+            type="search"
+            placeholder="Search your activity…"
+            value={query}
+            onChange={(e) => onChange(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && onSubmit()}
+            style={{ margin: 0, paddingLeft: 38, paddingRight: query ? 36 : 14 }}
+          />
+          <SearchIcon
+            size={18}
+            style={{
+              position: "absolute",
+              left: 12,
+              top: "50%",
+              transform: "translateY(-50%)",
+              color: "var(--text-dim)",
+              pointerEvents: "none",
+            }}
+          />
+          {query && (
+            <button
+              type="button"
+              className="ghost"
+              onClick={clearQuery}
+              style={{
+                position: "absolute",
+                right: 4,
+                top: "50%",
+                transform: "translateY(-50%)",
+                padding: 6,
+                color: "var(--text-dim)",
+              }}
+              title="Clear"
+            >
+              <CloseIcon size={16} />
+            </button>
+          )}
+        </div>
         <button onClick={onSubmit}>Search</button>
       </div>
 
-      {state.kind === "searching" && <p>Searching…</p>}
+      {state.kind === "searching" && (
+        <div className="card" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span className="status-pulse-live" />
+          <p className="hint" style={{ margin: 0 }}>Searching across local and remote indexes…</p>
+        </div>
+      )}
 
       {state.kind === "error" && (
-        <>
-          <p className="status-error">{state.message}</p>
+        <div className="card panel-danger">
+          <p className="status-error" style={{ marginBottom: 10 }}>{state.message}</p>
           <button onClick={onSubmit}>Retry</button>
-        </>
+        </div>
       )}
 
       {state.kind === "results" && (
         <>
           {state.fallback && (
-            <p className="hint setup-note">Meaning-based search isn't available on this device — showing text matches.</p>
+            <p className="hint setup-note" style={{ color: "var(--warning)" }}>
+              Meaning-based search isn't available on this device — showing text matches.
+            </p>
           )}
           {state.serverSkipped && (
-            <p className="status-error">Home PC offline — showing device results only.</p>
+            <div className="card panel-danger" style={{ marginBottom: 12, padding: "10px 14px" }}>
+              <p className="status-error" style={{ fontSize: 13, margin: 0 }}>
+                Home PC offline — showing device results only.
+              </p>
+            </div>
           )}
+
           {state.hits.length > 0 && (
-            <div style={{ display: "flex", gap: 6, margin: "8px 0 12px", alignItems: "center", flexWrap: "wrap" }}>
-              <span className="hint" style={{ fontSize: 12, marginRight: 2 }}>Sort:</span>
+            <div className="segmented-control">
               <button
                 type="button"
-                className={sortMode === "hybrid" ? "secondary" : "ghost"}
-                style={{ padding: "4px 8px", fontSize: 11, fontWeight: sortMode === "hybrid" ? 600 : 400 }}
+                className={`segmented-btn ${sortMode === "hybrid" ? "active" : ""}`}
                 onClick={() => handleSortChange("hybrid")}
               >
                 Recency & Relevance
               </button>
               <button
                 type="button"
-                className={sortMode === "recency" ? "secondary" : "ghost"}
-                style={{ padding: "4px 8px", fontSize: 11, fontWeight: sortMode === "recency" ? 600 : 400 }}
+                className={`segmented-btn ${sortMode === "recency" ? "active" : ""}`}
                 onClick={() => handleSortChange("recency")}
               >
                 Newest First
               </button>
               <button
                 type="button"
-                className={sortMode === "relevance" ? "secondary" : "ghost"}
-                style={{ padding: "4px 8px", fontSize: 11, fontWeight: sortMode === "relevance" ? 600 : 400 }}
+                className={`segmented-btn ${sortMode === "relevance" ? "active" : ""}`}
                 onClick={() => handleSortChange("relevance")}
               >
                 Best Match
               </button>
             </div>
           )}
+
           {state.hits.length === 0 && (
-            <p className="hint">Nothing matched. Captures are indexed as they're triaged — that happens when you reopen the app.</p>
+            <div className="card" style={{ textAlign: "center", padding: "28px 16px" }}>
+              <p className="hint" style={{ margin: 0 }}>
+                Nothing matched. Captures are indexed as they're triaged — that happens when you reopen the app.
+              </p>
+            </div>
           )}
+
           <ul>
-            {state.hits.map((h, i) => (
-              <li key={i} className="card clickable" onClick={() => setExpanded(expanded === i ? null : i)}>
-                <div className="card-row">
-                  <span className="card-title">{h.source === "local" ? "On this device" : "From home PC"}</span>
-                  <span className="card-meta">{formatHitTime(h.timestamp)}</span>
-                </div>
-                <div className={expanded === i ? "card-body" : "card-body truncated"}>{h.text}</div>
-                {h.app_label && <span className="card-meta">{h.app_label}</span>}
-              </li>
-            ))}
+            {state.hits.map((h, i) => {
+              const isExpanded = expanded === i;
+              return (
+                <li
+                  key={i}
+                  className="card clickable"
+                  onClick={() => setExpanded(isExpanded ? null : i)}
+                >
+                  <div className="card-row">
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span className={`badge ${h.source === "local" ? "primary" : "success"}`}>
+                        {h.source === "local" ? "On this device" : "From home PC"}
+                      </span>
+                      {h.app_label && <span className="badge">{h.app_label}</span>}
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span className="card-meta">{formatHitTime(h.timestamp)}</span>
+                      {isExpanded ? (
+                        <ChevronDownIcon size={14} style={{ color: "var(--text-dim)" }} />
+                      ) : (
+                        <ChevronRightIcon size={14} style={{ color: "var(--text-dim)" }} />
+                      )}
+                    </div>
+                  </div>
+                  <div className={isExpanded ? "card-body" : "card-body truncated"}>
+                    {h.text}
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         </>
       )}
-
-      <nav className="tabbar">
-        <button onClick={() => navigate("/setup")}>Setup</button>
-        <button onClick={() => navigate("/status")}>Status</button>
-        <button onClick={() => navigate("/recent")}>Recent</button>
-        <button onClick={() => navigate("/ask")}>Ask</button>
-      </nav>
     </div>
   );
 }
