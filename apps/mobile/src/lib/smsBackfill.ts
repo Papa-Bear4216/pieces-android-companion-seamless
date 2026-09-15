@@ -75,8 +75,22 @@ export async function setSmsAllowlist(numbers: string[]): Promise<number> {
 // --- Backfill ---------------------------------------------------------
 
 /**
+ * Resets the SMS backfill cursor to a recent window (default: last 30 days)
+ * relative to the newest message on the device. This ensures recent, active
+ * conversations populate first before older multi-year archives.
+ */
+export async function resetSmsBackfillToRecent(days = 30): Promise<number> {
+  const latestRes = (await SmsReader.latestMessageDate().catch(() => null)) as { date?: number } | null;
+  const latestDate = Number(latestRes?.date ?? 0);
+  const baseTime = latestDate > 0 ? latestDate : Date.now();
+  const target = Math.max(0, baseTime - days * 86400 * 1000);
+  await setSmsBackfillHighWater(target);
+  return target;
+}
+
+/**
  * Pull SMS history newer than the stored high-water mark into the usage queue,
- * filtered to the contact allowlist, one page at a time. Bounded by MAX_PER_RUN.
+ * up to MAX_PER_RUN messages per call. Flushed in the background by flushUsageEvents.
  * Safe to call repeatedly — a no-op once caught up or when the allowlist is empty.
  */
 export async function runSmsBackfill(
@@ -91,6 +105,12 @@ export async function runSmsBackfill(
   }
 
   let since = await getSmsBackfillHighWater();
+  if (since === 0) {
+    // Initial run: start at the recent window (last 30 days) so recent messages
+    // populate immediately into PiecesOS and Mem0 instead of walking years of history first.
+    since = await resetSmsBackfillToRecent(30);
+  }
+
   let ingested = 0;
 
   while (ingested < MAX_PER_RUN) {

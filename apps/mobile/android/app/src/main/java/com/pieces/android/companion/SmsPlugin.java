@@ -91,7 +91,8 @@ public class SmsPlugin extends Plugin {
     }
 
     /**
-     * All contacts that have at least one phone number, for the allowlist picker.
+     * All contacts that have at least one phone number that sent an inbound SMS
+     * during the current year (excluding short codes and OTPs), for the allowlist picker.
      * Returns { contacts: [{ name, numbers: [digits...] }] }, name-sorted.
      */
     @PluginMethod
@@ -99,7 +100,36 @@ public class SmsPlugin extends Plugin {
         if (!contactsGranted()) { call.reject("READ_CONTACTS not granted"); return; }
         executor.execute(() -> {
             try {
-                // name -> set of normalized numbers
+                // 1) Calculate start of current year (e.g. Jan 1, 2026 00:00:00)
+                java.util.Calendar cal = java.util.Calendar.getInstance();
+                cal.set(java.util.Calendar.DAY_OF_YEAR, 1);
+                cal.set(java.util.Calendar.HOUR_OF_DAY, 0);
+                cal.set(java.util.Calendar.MINUTE, 0);
+                cal.set(java.util.Calendar.SECOND, 0);
+                cal.set(java.util.Calendar.MILLISECOND, 0);
+                long startOfYear = cal.getTimeInMillis();
+
+                // 2) Find distinct normalized addresses from SMS inbox from this year only,
+                //    rejecting short codes and automated OTPs (< 10 digits).
+                Set<String> activeInboundNumbers = new HashSet<>();
+                try (Cursor c = getContext().getContentResolver().query(
+                        Telephony.Sms.Inbox.CONTENT_URI,
+                        new String[]{"DISTINCT " + Telephony.Sms.ADDRESS},
+                        Telephony.Sms.DATE + " >= ?",
+                        new String[]{String.valueOf(startOfYear)},
+                        null)) {
+                    while (c != null && c.moveToNext()) {
+                        String raw = c.getString(0);
+                        if (raw != null) {
+                            String norm = normalize(raw);
+                            if (norm.length() >= 10 && norm.length() <= 15) {
+                                activeInboundNumbers.add(norm);
+                            }
+                        }
+                    }
+                }
+
+                // 3) name -> set of normalized numbers, filtered to contacts who have sent messages this year
                 Map<String, Set<String>> byName = new java.util.TreeMap<>(String.CASE_INSENSITIVE_ORDER);
                 try (Cursor c = getContext().getContentResolver().query(
                         ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
@@ -112,8 +142,9 @@ public class SmsPlugin extends Plugin {
                     while (c != null && c.moveToNext()) {
                         String name = c.getString(0);
                         String number = normalize(c.getString(1));
-                        if (name == null || name.isEmpty() || number.isEmpty()) continue;
-                        byName.computeIfAbsent(name, k -> new java.util.LinkedHashSet<>()).add(number);
+                        if (name == null || name.trim().isEmpty() || number.isEmpty()) continue;
+                        if (!activeInboundNumbers.contains(number)) continue;
+                        byName.computeIfAbsent(name.trim(), k -> new java.util.LinkedHashSet<>()).add(number);
                     }
                 }
 

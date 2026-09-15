@@ -18,9 +18,12 @@ export class EmbedderUnavailableError extends Error {
   }
 }
 
+export type SearchSortMode = "hybrid" | "recency" | "relevance";
+
 export type SearchHit = {
   text: string;
   score: number; // 0..1 — dot product of L2-normalized vectors (== cosine)
+  rankScore?: number; // combined recency-decayed score
   timestamp: string;
   source: "local" | "server";
   app_label?: string; // local hits only
@@ -34,6 +37,59 @@ export type SearchResult = {
 
 export const MIN_SCORE = 0.2;
 export const DEFAULT_LIMIT = 20;
+
+/**
+ * Calculates a recency decay factor between 0.50 (floor for older items) and 1.0 (today).
+ * Uses a smooth 60-day half-life decay.
+ * Returns 1.0 for missing or unparseable timestamps (neutral behavior).
+ */
+export function computeRecencyFactor(timestamp?: string, nowMillis = Date.now()): number {
+  if (!timestamp) return 1.0;
+  const d = new Date(timestamp);
+  const t = d.getTime();
+  if (isNaN(t)) return 1.0;
+  const diffMs = Math.max(0, nowMillis - t);
+  const days = diffMs / (1000 * 60 * 60 * 24);
+  const HALF_LIFE_DAYS = 60;
+  const FLOOR = 0.5;
+  const decay = Math.pow(0.5, days / HALF_LIFE_DAYS);
+  return FLOOR + (1 - FLOOR) * decay;
+}
+
+export function rankHits(
+  hits: SearchHit[],
+  mode: SearchSortMode = "hybrid",
+  limit = DEFAULT_LIMIT,
+  nowMillis = Date.now(),
+): SearchHit[] {
+  const eligible = hits.filter((h) => h.score >= MIN_SCORE);
+
+  if (mode === "relevance") {
+    return eligible
+      .sort((a, b) => b.score - a.score || b.timestamp.localeCompare(a.timestamp))
+      .slice(0, limit);
+  }
+
+  if (mode === "recency") {
+    return eligible
+      .sort((a, b) => {
+        const tA = new Date(a.timestamp).getTime();
+        const tB = new Date(b.timestamp).getTime();
+        if (!isNaN(tA) && !isNaN(tB)) return tB - tA;
+        return b.timestamp.localeCompare(a.timestamp) || b.score - a.score;
+      })
+      .slice(0, limit);
+  }
+
+  // "hybrid" — recency-weighted relevance ("recency then relevance")
+  return eligible
+    .map((h) => ({
+      ...h,
+      rankScore: h.score * computeRecencyFactor(h.timestamp, nowMillis),
+    }))
+    .sort((a, b) => (b.rankScore ?? b.score) - (a.rankScore ?? a.score) || b.timestamp.localeCompare(a.timestamp))
+    .slice(0, limit);
+}
 
 // Session cache of server-summary vectors, keyed by summary id. Server
 // summaries live authoritatively on the home node and change server-side,
@@ -60,14 +116,15 @@ function summaryText(s: WorkstreamSummary): string {
 
 export async function semanticSearch(
   query: string,
-  opts?: { limit?: number },
+  opts?: { limit?: number; sort?: SearchSortMode },
 ): Promise<SearchResult> {
   const limit = opts?.limit ?? DEFAULT_LIMIT;
+  const sortMode = opts?.sort ?? "hybrid";
   const trimmed = query.trim();
   if (!trimmed) return { hits: [], serverSkipped: false, mode: "relevant" };
 
   if (!(await embedderAvailable())) {
-    return textFallback(trimmed, limit);
+    return textFallback(trimmed, limit, sortMode);
   }
 
   const queryEmb = await embed(trimmed);
@@ -118,15 +175,11 @@ export async function semanticSearch(
     }
   }
 
-  const ranked = hits
-    .filter((h) => h.score >= MIN_SCORE)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, limit);
-
+  const ranked = rankHits(hits, sortMode, limit);
   return { hits: ranked, serverSkipped, mode: "relevant" };
 }
 
-async function textFallback(query: string, limit: number): Promise<SearchResult> {
+async function textFallback(query: string, limit: number, sortMode: SearchSortMode = "hybrid"): Promise<SearchResult> {
   const needle = query.toLowerCase();
   const hits: SearchHit[] = [];
 
@@ -159,8 +212,9 @@ async function textFallback(query: string, limit: number): Promise<SearchResult>
     }
   }
 
+  const ranked = rankHits(hits, sortMode, limit);
   return {
-    hits: hits.sort((a, b) => b.timestamp.localeCompare(a.timestamp)).slice(0, limit),
+    hits: ranked,
     serverSkipped,
     mode: "text-fallback",
   };

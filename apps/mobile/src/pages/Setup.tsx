@@ -22,7 +22,7 @@ import {
   startNotificationCaptureListener,
 } from "../lib/notificationCapture";
 import {
-  smsPermissions, grantSmsViaShizuku, runSmsBackfill,
+  smsPermissions, grantSmsViaShizuku, runSmsBackfill, resetSmsBackfillToRecent,
   listSmsContacts, getSmsAllowlist, setSmsAllowlist, type SmsContact,
 } from "../lib/smsBackfill";
 
@@ -149,13 +149,11 @@ export default function Setup() {
   async function handleOpenPicker() {
     setSmsError(null);
     setPickerOpen(true);
-    if (contacts.length === 0) {
-      try {
-        setContacts(await listSmsContacts());
-      } catch (e) {
-        setSmsError(e instanceof Error ? e.message : String(e));
-        setPickerOpen(false);
-      }
+    try {
+      setContacts(await listSmsContacts());
+    } catch (e) {
+      setSmsError(e instanceof Error ? e.message : String(e));
+      setPickerOpen(false);
     }
   }
 
@@ -202,6 +200,29 @@ export default function Setup() {
       setSmsError(e instanceof Error ? e.message : String(e));
     }
     setSmsBusy(false);
+  }
+
+  async function handleResetToRecent() {
+    setSmsBusy(true);
+    setSmsError(null);
+    setSmsResult(null);
+    try {
+      const target = await resetSmsBackfillToRecent(30);
+      const targetDate = new Date(target).toLocaleDateString();
+      const res = await runSmsBackfill((p) => {
+        setSmsResult(`Syncing recent from ${targetDate}: ${p.ingested} message${p.ingested === 1 ? "" : "s"}…`);
+      });
+      await flushUsageEvents();
+      setSmsResult(
+        res.ingested > 0
+          ? `Synced ${res.ingested} recent message${res.ingested === 1 ? "" : "s"} from ${targetDate} forward.`
+          : `Caught up — no newer messages found since ${targetDate}.`
+      );
+    } catch (e) {
+      setSmsError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSmsBusy(false);
+    }
   }
 
   async function handleToggleScreenContext(next: boolean) {
@@ -596,6 +617,14 @@ export default function Setup() {
               >
                 {smsBusy ? "Backfilling…" : "Backfill now"}
               </button>
+              <button
+                onClick={handleResetToRecent}
+                disabled={smsBusy || smsAllow.size === 0}
+                style={{ marginLeft: 8 }}
+                title="Jump directly to the last 30 days of messages"
+              >
+                Sync Recent (30d)
+              </button>
             </>
           )}
           {smsResult && <p className="status-ok" style={{ margin: "8px 0 0 0" }}>{smsResult}</p>}
@@ -611,13 +640,55 @@ export default function Setup() {
               onChange={(e) => setContactFilter(e.target.value)}
               style={{ width: "100%", marginBottom: 8 }}
             />
+            <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
+              <button
+                type="button"
+                className="secondary"
+                style={{ fontSize: "0.75rem", padding: "3px 8px" }}
+                onClick={() => {
+                  const visible = contacts.filter((c) =>
+                    c.name.toLowerCase().includes(contactFilter.toLowerCase())
+                  );
+                  setSmsAllow((prev) => {
+                    const next = new Set(prev);
+                    for (const c of visible) {
+                      for (const n of c.numbers) next.add(n);
+                    }
+                    return next;
+                  });
+                }}
+              >
+                Select All
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                style={{ fontSize: "0.75rem", padding: "3px 8px" }}
+                onClick={() => {
+                  const visible = contacts.filter((c) =>
+                    c.name.toLowerCase().includes(contactFilter.toLowerCase())
+                  );
+                  setSmsAllow((prev) => {
+                    const next = new Set(prev);
+                    for (const c of visible) {
+                      for (const n of c.numbers) next.delete(n);
+                    }
+                    return next;
+                  });
+                }}
+              >
+                Deselect All
+              </button>
+              <span className="hint" style={{ marginLeft: "auto", fontSize: "0.75rem" }}>
+                {contacts.length} contact{contacts.length === 1 ? "" : "s"} (2026 inbound)
+              </span>
+            </div>
             <div style={{ maxHeight: 260, overflowY: "auto" }}>
               {contacts.length === 0 && <p className="hint">Loading contacts…</p>}
               {contacts
                 .filter((c) =>
                   c.name.toLowerCase().includes(contactFilter.toLowerCase())
                 )
-                .slice(0, 300)
                 .map((c) => {
                   const on = c.numbers.length > 0 && c.numbers.every((n) => smsAllow.has(n));
                   return (

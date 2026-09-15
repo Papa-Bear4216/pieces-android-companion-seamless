@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
-import { semanticSearch, type SearchHit } from "../lib/semanticSearch";
+import { semanticSearch, type SearchHit, type SearchSortMode } from "../lib/semanticSearch";
 import { recordEvent } from "../lib/usage";
 
 type State =
@@ -22,11 +22,12 @@ function formatHitTime(ts: string): string {
 export default function Search() {
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
+  const [sortMode, setSortMode] = useState<SearchSortMode>("hybrid");
   const [state, setState] = useState<State>({ kind: "idle" });
   const [expanded, setExpanded] = useState<number | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  const run = useCallback(async (q: string) => {
+  const run = useCallback(async (q: string, sort = sortMode) => {
     const trimmed = q.trim();
     if (!trimmed) {
       setState({ kind: "idle" });
@@ -34,7 +35,7 @@ export default function Search() {
     }
     setState({ kind: "searching" });
     try {
-      const result = await semanticSearch(trimmed);
+      const result = await semanticSearch(trimmed, { sort });
       setState({
         kind: "results",
         hits: result.hits,
@@ -53,7 +54,14 @@ export default function Search() {
     } catch (err) {
       setState({ kind: "error", message: err instanceof Error ? err.message : String(err) });
     }
-  }, []);
+  }, [sortMode]);
+
+  function handleSortChange(next: SearchSortMode) {
+    setSortMode(next);
+    if (query.trim()) {
+      run(query, next);
+    }
+  }
 
   useEffect(() => {
     return () => clearTimeout(timer.current);
@@ -103,6 +111,35 @@ export default function Search() {
           )}
           {state.serverSkipped && (
             <p className="status-error">Home PC offline — showing device results only.</p>
+          )}
+          {state.hits.length > 0 && (
+            <div style={{ display: "flex", gap: 6, margin: "8px 0 12px", alignItems: "center", flexWrap: "wrap" }}>
+              <span className="hint" style={{ fontSize: 12, marginRight: 2 }}>Sort:</span>
+              <button
+                type="button"
+                className={sortMode === "hybrid" ? "secondary" : "ghost"}
+                style={{ padding: "4px 8px", fontSize: 11, fontWeight: sortMode === "hybrid" ? 600 : 400 }}
+                onClick={() => handleSortChange("hybrid")}
+              >
+                Recency & Relevance
+              </button>
+              <button
+                type="button"
+                className={sortMode === "recency" ? "secondary" : "ghost"}
+                style={{ padding: "4px 8px", fontSize: 11, fontWeight: sortMode === "recency" ? 600 : 400 }}
+                onClick={() => handleSortChange("recency")}
+              >
+                Newest First
+              </button>
+              <button
+                type="button"
+                className={sortMode === "relevance" ? "secondary" : "ghost"}
+                style={{ padding: "4px 8px", fontSize: 11, fontWeight: sortMode === "relevance" ? 600 : 400 }}
+                onClick={() => handleSortChange("relevance")}
+              >
+                Best Match
+              </button>
+            </div>
           )}
           {state.hits.length === 0 && (
             <p className="hint">Nothing matched. Captures are indexed as they're triaged — that happens when you reopen the app.</p>

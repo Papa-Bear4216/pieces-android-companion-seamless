@@ -309,25 +309,32 @@ const server = createServer(async (req, res) => {
             : batch.map((e) => summarizeTelemetry(e)).join("\n\n===\n\n");
         const rawTelemetry = batch[0]?.telemetry ?? "";
         const actionMatch = rawTelemetry.match(/ACTION:\s*(.+)/)?.[1]?.trim();
+        const smsMatch = rawTelemetry.match(/^SMS (inbound|outbound|draft|other) (.+)\n/);
+        const batchTimestamp = batch[0]?.timestamp;
+        const dateTag = batchTimestamp ? new Date(batchTimestamp).toISOString().replace("T", " ").slice(0, 19) : "";
+
         const title = actionMatch
-          ? `Android Activity: ${actionMatch}`
-          : batch.length === 1
-            ? "Android Context: System Telemetry"
-            : `Android Context: System Telemetry (${batch.length} events batched)`;
+          ? `Android Activity: ${actionMatch}${dateTag ? ` · ${dateTag}` : ""}`
+          : smsMatch
+            ? `SMS Context: ${smsMatch[2]} (${smsMatch[1]}${dateTag ? ` · ${dateTag}` : ""})`
+            : batch.length === 1
+              ? `Android Context: ${batch[0]?.app_label ?? "System Telemetry"}${dateTag ? ` · ${dateTag}` : ""}`
+              : `Android Context: ${batch[0]?.app_label ?? "System Telemetry"} (${batch.length} events${dateTag ? ` · ${dateTag}` : ""})`;
 
         // Surprisal gate: skip seeding near-duplicate/unsurprising content.
         // Fails open (see surprisal.ts) — never a silent data-loss path.
         const novel = await shouldSeed(packageName, bodyText);
         if (!novel) continue;
 
-        await addToMem0(bodyText);
+        const mem0Content = batchTimestamp ? `[Event Time: ${batchTimestamp}]\n${bodyText}` : bodyText;
+        await addToMem0(mem0Content);
         await pipeToRegistryApp(batch, packageName, batch[0]?.app_label);
 
         // Ambient workstream telemetry is routed strictly to WorkstreamEvents.
         // Asset creation (/assets/create) is skipped for Nano action streams to avoid store bloat.
         if (!actionMatch) {
           try {
-            await seedToPiecesOS(PIECES_BASE_URL, bodyText, title);
+            await seedToPiecesOS(PIECES_BASE_URL, bodyText, title, batchTimestamp);
           } catch (err) {
             console.warn("PiecesOS not reachable for seeding; queued for retry.", err);
             await seedQueue.enqueue(bodyText, title, "asset");

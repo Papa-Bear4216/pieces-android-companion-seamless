@@ -106,7 +106,8 @@ export function androidTimelineReadable(e: TelemetryEvent): string {
   }
   const summary = telemetry.slice(markerAt + ON_DEVICE_SUMMARY_MARKER.length).trim();
   const label = e.app_label?.trim() || e.package?.trim() || "unknown app";
-  return `[Android · ${label}] ${summary}`;
+  const datePrefix = e.timestamp ? `[${e.timestamp}] ` : "";
+  return `${datePrefix}[Android · ${label}] ${summary}`;
 }
 
 export function summarizeTelemetry(e: TelemetryEvent): string {
@@ -285,25 +286,30 @@ async function getApplication(piecesBaseUrl: string): Promise<any> {
   return cachedApplication;
 }
 
-export async function seedToPiecesOS(piecesBaseUrl: string, bodyText: string, title: string) {
+export async function seedToPiecesOS(piecesBaseUrl: string, bodyText: string, title: string, timestamp?: string) {
   // 1) Identify the client application (cached — see getApplication above)
   const application = await getApplication(piecesBaseUrl);
 
   // 2) Create an asset
+  const assetPayload: any = {
+    application,
+    metadata: { name: title },
+    format: {
+      fragment: {
+        string: { raw: bodyText },
+      },
+    },
+  };
+  if (timestamp) {
+    assetPayload.created = { value: timestamp };
+  }
+
   const createRes = await fetch(`${piecesBaseUrl}/assets/create`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       type: "SEEDED_ASSET",
-      asset: {
-        application,
-        metadata: { name: title },
-        format: {
-          fragment: {
-            string: { raw: bodyText },
-          },
-        },
-      },
+      asset: assetPayload,
     }),
   });
 
