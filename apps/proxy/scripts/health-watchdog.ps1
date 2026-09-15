@@ -32,34 +32,89 @@ function Test-ProxyHealthy {
     }
 }
 
-if (Test-ProxyHealthy) { exit 0 }
+$PiecesHealthUrl = 'http://127.0.0.1:39300/.well-known/health'
+$PiecesAppId    = 'com.MeshIntelligentTechnologi.PiecesOS_84gz00a5z79wr!osserver'
 
-Start-Sleep -Seconds 5
-if (Test-ProxyHealthy) { exit 0 }
+function Test-PiecesHealthy {
+    try {
+        $r = Invoke-WebRequest -Uri $PiecesHealthUrl -TimeoutSec 5 -UseBasicParsing
+        return ($r.StatusCode -eq 200 -and $r.Content -match 'ok')
+    } catch {
+        return $false
+    }
+}
 
-Log "proxy unhealthy on both probes - recycling"
+# --- 1. Pieces OS Check ---
+$piecesOk = Test-PiecesHealthy
+if (-not $piecesOk) {
+    Start-Sleep -Seconds 5
+    $piecesOk = Test-PiecesHealthy
+}
 
-# Stop the task, then hard-kill anything still holding 8787 (the wedged process
-# will not exit on Stop-ScheduledTask alone).
-try { Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue } catch {}
-Start-Sleep -Seconds 2
-
-try {
-    $lines = & netstat -ano -p TCP | Select-String ':8787\s+.*LISTENING'
-    foreach ($ln in $lines) {
-        $stalePid = ($ln.ToString() -split '\s+')[-1]
-        if ($stalePid -match '^\d+$') {
-            Log "killing pid $stalePid holding :8787"
-            & taskkill /F /T /PID $stalePid 2>&1 | Out-Null
+if (-not $piecesOk) {
+    Log "PiecesOS unhealthy on port 39300"
+    $osProc = Get-Process -Name "os_server" -ErrorAction SilentlyContinue | Select-Object -First 1
+    $shouldRelaunch = $true
+    if ($osProc) {
+        try {
+            $uptime = (Get-Date) - $osProc.StartTime
+            # PiecesOS has a known 20-30s slow-bind bug after launch; allow 45s grace period
+            if ($uptime.TotalSeconds -lt 45) {
+                Log "os_server PID $($osProc.Id) started $([int]$uptime.TotalSeconds)s ago (within 45s boot grace) - waiting"
+                $shouldRelaunch = $false
+            } else {
+                Log "killing wedged os_server PID $($osProc.Id) (running $([int]$uptime.TotalSeconds)s without binding port)"
+                Stop-Process -Id $osProc.Id -Force -ErrorAction SilentlyContinue
+                Start-Sleep -Seconds 2
+            }
+        } catch {
+            Log "error inspecting os_server process: $($_.Exception.Message)"
         }
     }
-} catch { Log "port cleanup error: $($_.Exception.Message)" }
+    if ($shouldRelaunch) {
+        Log "launching Pieces OS Store package"
+        try {
+            Start-Process "explorer.exe" "shell:AppsFolder\$PiecesAppId"
+            Log "Pieces OS launch command issued"
+        } catch {
+            Log "failed to launch Pieces OS: $($_.Exception.Message)"
+        }
+    }
+}
 
-Start-Sleep -Seconds 2
-try { Start-ScheduledTask -TaskName $TaskName -ErrorAction Stop; Log "restart issued" }
-catch { Log "FAILED to start task: $($_.Exception.Message)"; exit 1 }
+# --- 2. Proxy Check ---
+$proxyOk = Test-ProxyHealthy
+if (-not $proxyOk) {
+    Start-Sleep -Seconds 5
+    $proxyOk = Test-ProxyHealthy
+}
 
-# Give it time to come back and record the outcome.
-Start-Sleep -Seconds 25
-if (Test-ProxyHealthy) { Log "recovered" } else { Log "still unhealthy after restart - will retry next run" }
+if (-not $proxyOk) {
+    Log "proxy unhealthy on both probes - recycling"
+
+    # Stop the task, then hard-kill anything still holding 8787 (the wedged process
+    # will not exit on Stop-ScheduledTask alone).
+    try { Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue } catch {}
+    Start-Sleep -Seconds 2
+
+    try {
+        $lines = & netstat -ano -p TCP | Select-String ':8787\s+.*LISTENING'
+        foreach ($ln in $lines) {
+            $stalePid = ($ln.ToString() -split '\s+')[-1]
+            if ($stalePid -match '^\d+$') {
+                Log "killing pid $stalePid holding :8787"
+                & taskkill /F /T /PID $stalePid 2>&1 | Out-Null
+            }
+        }
+    } catch { Log "port cleanup error: $($_.Exception.Message)" }
+
+    Start-Sleep -Seconds 2
+    try { Start-ScheduledTask -TaskName $TaskName -ErrorAction Stop; Log "restart issued" }
+    catch { Log "FAILED to start task: $($_.Exception.Message)"; exit 1 }
+
+    # Give it time to come back and record the outcome.
+    Start-Sleep -Seconds 25
+    if (Test-ProxyHealthy) { Log "recovered" } else { Log "still unhealthy after restart - will retry next run" }
+}
+
 exit 0
