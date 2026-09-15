@@ -80,53 +80,18 @@ function callGeminiViaAgy(prompt: string): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile(
       AGY_PATH,
-      ["agentapi", "new-conversation", "--model=flash", prompt],
-      { timeout: 35000 },
+      ["-p", prompt, "--model", "gemini-3.7-flash-low"],
+      { timeout: 45000, maxBuffer: 10 * 1024 * 1024 },
       (err, stdout, stderr) => {
-        if (err) return reject(err);
-        try {
-          const data = JSON.parse(stdout);
-          const convId = data.response?.newConversation?.conversationId;
-          if (!convId) return reject(new Error("No conversationId returned: " + stdout));
-
-          const userProfile = process.env.USERPROFILE || "C:\\Users\\micha";
-          const transcriptPath = path.join(
-            userProfile,
-            ".gemini",
-            "antigravity-cli",
-            "brain",
-            convId,
-            ".system_generated",
-            "logs",
-            "transcript.jsonl",
-          );
-
-          const startTime = Date.now();
-          const check = () => {
-            if (fs.existsSync(transcriptPath)) {
-              try {
-                const content = fs.readFileSync(transcriptPath, "utf8");
-                const lines = content.trim().split("\n");
-                for (const line of lines) {
-                  if (!line) continue;
-                  try {
-                    const entry = JSON.parse(line);
-                    if (entry.source === "MODEL" && entry.type === "PLANNER_RESPONSE" && entry.content) {
-                      return resolve(entry.content);
-                    }
-                  } catch {}
-                }
-              } catch {}
-            }
-            if (Date.now() - startTime > 25000) {
-              return reject(new Error("Timed out waiting for Gemini response in transcript"));
-            }
-            setTimeout(check, 500);
-          };
-          setTimeout(check, 1000);
-        } catch (e) {
-          reject(e);
+        if (err) {
+          console.error("[callGeminiViaAgy] error:", err, stderr);
+          return reject(new Error(`agy CLI error: ${err.message}${stderr ? " - " + stderr : ""}`));
         }
+        const reply = stdout.trim();
+        if (!reply) {
+          return reject(new Error("Empty reply returned from agy"));
+        }
+        resolve(reply);
       },
     );
   });
