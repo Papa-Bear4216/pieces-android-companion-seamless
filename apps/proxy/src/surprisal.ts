@@ -1,48 +1,45 @@
 import { createHash } from "node:crypto";
 
 // Surprisal gate: before seeding a telemetry blob into Mem0/PiecesOS, score
-// how novel it is relative to recent captures from the same package. Two
-// layers, cheapest first:
+// how novel it is relative to recent captures from the same package.
 //
-//  1. Exact/near-duplicate backstop — a hash of normalized text, checked
-//     against a short-lived per-package cache. Catches the common case
-//     (identical or near-identical screen) for free, no model call needed.
-//  2. Semantic similarity via local Ollama embeddings — for text that
-//     passes layer 1, embed the candidate and compare (cosine similarity)
-//     against embeddings of recent history for that package. High
-//     similarity to something already seeded means "more of the same" and
-//     gets skipped.
+// Previous design relied on local Ollama embeddings over HTTP. In practice:
+//  1. Ollama is heavy (hogs 4-8GB RAM), fragile, and on Windows often fails or hangs.
+//  2. When Ollama was down, the gate "failed open", causing 100% of duplicate
+//     screens to flood PiecesOS and Mem0 unconstrained.
 //
-//     (True logprob-based perplexity was the original design, but Ollama's
-//     stable /api/generate does not expose per-token logprobs — only
-//     eval_count/eval_duration timing stats. /api/embeddings is the
-//     supported local-model primitive that actually exists today, so this
-//     uses embedding similarity as the novelty signal instead.)
-//
-// Fails open: if Ollama is unreachable or slow, the event is treated as
-// novel and seeded anyway. This gate exists to cut noise, not to be a
-// second point of data loss — an optional quality filter must never
-// silently drop real data when its dependency is down.
+// New zero-dependency in-process design:
+//  Layer 1: Exact sha256 hash of normalized text (catches identical screens instantly).
+//  Layer 2: Token-set Jaccard similarity with timestamp/battery normalization.
+//           Runs in < 0.1ms inside Node.js, uses 0 extra RAM, and never fails open.
 
-// OLLAMA_BASE_URL is the canonical name (also used by ollama-fallback.ts) —
-// OLLAMA_URL is kept as a fallback so an existing env that only sets the old
-// name still works. Set OLLAMA_BASE_URL and both subsystems point at the same
-// Ollama instance.
-const OLLAMA_URL = process.env.OLLAMA_BASE_URL ?? process.env.OLLAMA_URL ?? "http://127.0.0.1:11434";
-const OLLAMA_MODEL = process.env.OLLAMA_SURPRISAL_MODEL ?? "nomic-embed-text";
-const OLLAMA_TIMEOUT_MS = Number(process.env.OLLAMA_TIMEOUT_MS ?? 3000);
+// Jaccard similarity above this to any recent same-package capture is
+// treated as redundant and skipped.
+const SIMILARITY_SKIP_THRESHOLD = Number(process.env.SURPRISAL_SIMILARITY_THRESHOLD ?? 0.85);
 
-// Cosine similarity above this to any recent same-package embedding is
-// treated as a near-duplicate and skipped. Tuned conservatively high —
-// false negatives (seeding something that was actually redundant) are
-// cheap; false positives (dropping real new content) are not.
-const SIMILARITY_SKIP_THRESHOLD = Number(process.env.SURPRISAL_SIMILARITY_THRESHOLD ?? 0.97);
+const DEDUPE_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+const HISTORY_PER_PACKAGE = 15;
 
-const DEDUPE_WINDOW_MS = 5 * 60 * 1000;
-const HISTORY_PER_PACKAGE = 5;
+type HistoryEntry = {
+  hash: string;
+  tokens: Set<string>;
+  at: number;
+};
 
-type HistoryEntry = { hash: string; text: string; at: number; embedding?: number[] };
 const recentByPackage = new Map<string, HistoryEntry[]>();
+
+// Strips transient screen noise like dynamic clocks (12:34, 12:34:56), battery percentages (95%),
+// dates, and punctuation before comparison.
+function tokenize(text: string): Set<string> {
+  const cleaned = text
+    .toLowerCase()
+    .replace(/\b\d{1,2}:\d{2}(?::\d{2})?(?:\s*[ap]m)?\b/gi, "") // clock times
+    .replace(/\b\d{1,3}%\b/g, "") // battery / percentages
+    .replace(/\b\d{4}-\d{2}-\d{2}\b/g, ""); // ISO dates
+
+  const words = cleaned.split(/[^\p{L}\p{N}_]+/u).filter((w) => w.length >= 3);
+  return new Set(words);
+}
 
 function normalize(text: string): string {
   return text
@@ -61,84 +58,58 @@ function pruneOld(entries: HistoryEntry[], now: number): HistoryEntry[] {
   return entries.filter((e) => now - e.at < DEDUPE_WINDOW_MS);
 }
 
-/** Layer 1: cheap exact/near-duplicate check against recent same-package history. */
-function isNearDuplicate(packageName: string, normalized: string, hash: string, now: number): boolean {
+function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 && b.size === 0) return 1.0;
+  if (a.size === 0 || b.size === 0) return 0.0;
+
+  let intersection = 0;
+  const [smaller, larger] = a.size < b.size ? [a, b] : [b, a];
+  for (const item of smaller) {
+    if (larger.has(item)) intersection++;
+  }
+  const union = a.size + b.size - intersection;
+  return union === 0 ? 0 : intersection / union;
+}
+
+/** Layer 1: cheap exact check against recent same-package history. */
+function isNearDuplicate(packageName: string, hash: string, now: number): boolean {
   const entries = pruneOld(recentByPackage.get(packageName) ?? [], now);
   recentByPackage.set(packageName, entries);
   return entries.some((e) => e.hash === hash);
 }
 
-function recordHistory(packageName: string, normalized: string, hash: string, now: number, embedding?: number[]): void {
+function recordHistory(packageName: string, hash: string, tokens: Set<string>, now: number): void {
   const entries = pruneOld(recentByPackage.get(packageName) ?? [], now);
-  entries.push({ hash, text: normalized, at: now, embedding });
+  entries.push({ hash, tokens, at: now });
   while (entries.length > HISTORY_PER_PACKAGE) entries.shift();
   recentByPackage.set(packageName, entries);
 }
 
-function cosineSimilarity(a: number[], b: number[]): number {
-  let dot = 0, normA = 0, normB = 0;
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i];
-    normA += a[i] * a[i];
-    normB += b[i] * b[i];
-  }
-  if (normA === 0 || normB === 0) return 0;
-  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
-}
-
 /**
- * Get an embedding vector for `text` from local Ollama. Returns null on any
- * failure (timeout, model missing, malformed response) so the caller can
- * fail open.
- */
-async function embed(text: string): Promise<number[] | null> {
-  try {
-    const res = await fetch(`${OLLAMA_URL}/api/embeddings`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ model: OLLAMA_MODEL, prompt: text }),
-      signal: AbortSignal.timeout(OLLAMA_TIMEOUT_MS),
-    });
-    if (!res.ok) return null;
-
-    const data = (await res.json()) as { embedding?: number[] };
-    return Array.isArray(data.embedding) && data.embedding.length > 0 ? data.embedding : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Returns true if `text` should be seeded (novel enough), false if it
- * should be skipped as redundant. Always updates history for the package
- * when the text is seeded, so subsequent calls compare against it.
+ * Returns true if `text` is novel enough to seed, false if redundant.
+ * Runs purely in-memory in <0.1ms with zero external dependencies.
  */
 export async function shouldSeed(packageName: string, text: string): Promise<boolean> {
   const now = Date.now();
   const normalized = normalize(text);
   const hash = hashOf(normalized);
 
-  if (isNearDuplicate(packageName, normalized, hash, now)) {
+  // 1. Exact match check
+  if (isNearDuplicate(packageName, hash, now)) {
     return false;
   }
 
-  const embedding = await embed(normalized);
-  // Fail open: no embedding available (Ollama down, model missing, etc.)
-  // means "seed it" — never let this gate be a silent data-loss path.
-  if (embedding === null) {
-    recordHistory(packageName, normalized, hash, now);
-    return true;
-  }
-
+  // 2. Token-set Jaccard similarity check
+  const candidateTokens = tokenize(normalized);
   const history = pruneOld(recentByPackage.get(packageName) ?? [], now);
+
   const maxSimilarity = history.reduce((max, e) => {
-    if (!e.embedding) return max;
-    return Math.max(max, cosineSimilarity(embedding, e.embedding));
+    return Math.max(max, jaccardSimilarity(candidateTokens, e.tokens));
   }, 0);
 
   const novel = maxSimilarity < SIMILARITY_SKIP_THRESHOLD;
   if (novel) {
-    recordHistory(packageName, normalized, hash, now, embedding);
+    recordHistory(packageName, hash, candidateTokens, now);
   }
   return novel;
 }

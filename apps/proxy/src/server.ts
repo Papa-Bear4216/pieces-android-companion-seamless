@@ -8,7 +8,7 @@ import { isValidBearerToken } from "./auth.ts";
 import { summarizeTelemetry, androidTimelineReadable, seedToPiecesOS, seedWorkstreamEvent, TelemetryEvent } from "./seeder.ts";
 import { SeedQueue } from "./seed-queue.js";
 import { shouldSeed } from "./surprisal.js";
-import { askOllamaFallback } from "./ollama-fallback.js";
+import { askGeminiFallback } from "./gemini-fallback.js";
 import { listWorkstreamSummaries } from "./summaries.js";
 import { MemoryClient } from "mem0ai";
 
@@ -194,9 +194,9 @@ const server = createServer(async (req, res) => {
     if (result.status === "unavailable") {
       // pieces.ask() is unavailable — currently always, since the account's
       // cloud allocation is broken (docs/ALLOWED_ROUTES.md's "Ask root cause"
-      // section). Try a local, Pieces-data-grounded fallback rather than
-      // surfacing a dead end; never worse than the original result if it fails.
-      const fallback = await askOllamaFallback(pieces, PIECES_BASE_URL, query);
+      // section). Use Gemini Flash via Antigravity (zero API key) grounded in
+      // Pieces data rather than surfacing a dead end.
+      const fallback = await askGeminiFallback(pieces, PIECES_BASE_URL, query);
       sendJson(res, 200, fallback.status === "answered" ? fallback : result);
       return;
     }
@@ -330,13 +330,15 @@ const server = createServer(async (req, res) => {
         await addToMem0(mem0Content);
         await pipeToRegistryApp(batch, packageName, batch[0]?.app_label);
 
-        // Ambient workstream telemetry is routed strictly to WorkstreamEvents.
-        // Asset creation (/assets/create) is skipped for Nano action streams to avoid store bloat.
-        if (!actionMatch) {
+        // Ambient workstream telemetry is routed strictly to WorkstreamEvents (timeline).
+        // Full PiecesOS Asset creation (/assets/create) is reserved for explicit high-value items
+        // (like SMS messages or deliberate saves) to prevent database bloat in Couchbase & Vector DB.
+        const shouldCreateAsset = Boolean(smsMatch);
+        if (shouldCreateAsset) {
           try {
             await seedToPiecesOS(PIECES_BASE_URL, bodyText, title, batchTimestamp);
           } catch (err) {
-            console.warn("PiecesOS not reachable for seeding; queued for retry.", err);
+            console.warn("PiecesOS not reachable for asset seeding; queued for retry.", err);
             await seedQueue.enqueue(bodyText, title, "asset");
           }
         }
