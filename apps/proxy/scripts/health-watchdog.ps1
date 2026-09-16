@@ -58,9 +58,9 @@ if (-not $piecesOk) {
     if ($osProc) {
         try {
             $uptime = (Get-Date) - $osProc.StartTime
-            # PiecesOS has a known 20-30s slow-bind bug after launch; allow 45s grace period
-            if ($uptime.TotalSeconds -lt 45) {
-                Log "os_server PID $($osProc.Id) started $([int]$uptime.TotalSeconds)s ago (within 45s boot grace) - waiting"
+            # PiecesOS has a known 20-30s slow-bind bug after launch; allow 75s grace period under load
+            if ($uptime.TotalSeconds -lt 75) {
+                Log "os_server PID $($osProc.Id) started $([int]$uptime.TotalSeconds)s ago (within 75s boot grace) - waiting"
                 $shouldRelaunch = $false
             } else {
                 Log "killing wedged os_server PID $($osProc.Id) (running $([int]$uptime.TotalSeconds)s without binding port)"
@@ -72,12 +72,23 @@ if (-not $piecesOk) {
         }
     }
     if ($shouldRelaunch) {
-        Log "launching Pieces OS Store package"
-        try {
-            Start-Process "explorer.exe" "shell:AppsFolder\$PiecesAppId"
-            Log "Pieces OS launch command issued"
-        } catch {
-            Log "failed to launch Pieces OS: $($_.Exception.Message)"
+        $aliasPath = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\com.MeshIntelligentTechnologi.PiecesOS_84gz00a5z79wr\os_server.exe'
+        if (Test-Path $aliasPath) {
+            Log "launching Pieces OS via AppExecutionAlias: $aliasPath"
+            try {
+                Start-Process $aliasPath
+                Log "Pieces OS alias launch command issued"
+            } catch {
+                Log "failed to launch Pieces OS via alias: $($_.Exception.Message)"
+            }
+        } else {
+            Log "launching Pieces OS Store package via explorer"
+            try {
+                Start-Process "explorer.exe" "shell:AppsFolder\$PiecesAppId"
+                Log "Pieces OS launch command issued"
+            } catch {
+                Log "failed to launch Pieces OS: $($_.Exception.Message)"
+            }
         }
     }
 }
