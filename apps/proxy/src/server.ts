@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { appendFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { Agent, setGlobalDispatcher } from "undici";
-import { PiecesClient } from "@pieces-android/pieces-api";
+import { PiecesClient, AskResult } from "@pieces-android/pieces-api";
 import { findAllowedRoute } from "@pieces-android/allowlist";
 import { isValidBearerToken } from "./auth.ts";
 import { summarizeTelemetry, androidTimelineReadable, seedToPiecesOS, seedWorkstreamEvent, TelemetryEvent } from "./seeder.ts";
@@ -190,15 +190,29 @@ const server = createServer(async (req, res) => {
       await addToMem0(query);
     }
 
-    const result = await pieces.ask(query);
+    let result: AskResult;
+    try {
+      result = await pieces.ask(query);
+    } catch (piecesErr) {
+      console.warn("[ask] pieces.ask failed, falling back to Gemini:", piecesErr);
+      result = { status: "unavailable", reason: piecesErr instanceof Error ? piecesErr.message : String(piecesErr) };
+    }
+
     if (result.status === "unavailable") {
       // pieces.ask() is unavailable — currently always, since the account's
       // cloud allocation is broken (docs/ALLOWED_ROUTES.md's "Ask root cause"
-      // section). Use Gemini Flash via Antigravity (zero API key) grounded in
-      // Pieces data rather than surfacing a dead end.
-      const fallback = await askGeminiFallback(pieces, PIECES_BASE_URL, query);
-      sendJson(res, 200, fallback.status === "answered" ? fallback : result);
-      return;
+      // section), or PiecesOS is temporarily restarting. Use Gemini Flash
+      // via Antigravity (zero API key) grounded in Pieces data rather than
+      // surfacing a dead end or 502.
+      try {
+        const fallback = await askGeminiFallback(pieces, PIECES_BASE_URL, query);
+        sendJson(res, 200, fallback.status === "answered" ? fallback : result);
+        return;
+      } catch (fallbackErr) {
+        console.error("[ask] Gemini fallback failed:", fallbackErr);
+        sendJson(res, 200, result);
+        return;
+      }
     }
     sendJson(res, 200, result);
     return;
