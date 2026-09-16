@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { PiecesClient } from "@pieces-android/pieces-api";
+import { listWorkstreamSummaries } from "./summaries.js";
 
 // Fallback for Pieces Ask endpoint using Gemini Flash via Antigravity (agy agentapi).
 // Requires NO API key, zero Ollama overhead, and returns grounded answers in seconds.
@@ -10,6 +11,7 @@ const AGY_PATH = process.env.AGY_PATH ?? "C:\\Users\\micha\\AppData\\Local\\agy\
 const WORKSTREAM_EVENTS_TIMEOUT_MS = 15000;
 const MAX_ASSET_SNIPPETS = 6;
 const MAX_EVENT_SNIPPETS = 8;
+const MAX_SUMMARY_SNIPPETS = 5;
 const MAX_SNIPPET_CHARS = 500;
 
 export type GeminiFallbackResult =
@@ -59,10 +61,21 @@ async function fetchRelevantWorkstreamEvents(piecesBaseUrl: string, query: strin
     .map(({ event }) => (event.readable ?? "").slice(0, MAX_SNIPPET_CHARS));
 }
 
+async function fetchRecentSummarySnippets(piecesBaseUrl: string): Promise<string[]> {
+  const summaries = await listWorkstreamSummaries(piecesBaseUrl);
+  // Not keyword-filtered: these are PiecesOS's own AI-condensed "what got done"
+  // rollups, exactly what recency-style asks ("what have you been working on")
+  // need, and the raw workstream_events keyword filter always scores 0 for them.
+  return summaries
+    .slice(0, MAX_SUMMARY_SNIPPETS)
+    .map((s) => `Workstream summary "${s.name}" (${s.created}): ${s.text.slice(0, MAX_SNIPPET_CHARS)}`);
+}
+
 async function gatherContext(pieces: PiecesClient, piecesBaseUrl: string, query: string): Promise<string[]> {
-  const [assets, events] = await Promise.all([
+  const [assets, events, summaries] = await Promise.all([
     pieces.relevantAssets(query).catch(() => []),
     fetchRelevantWorkstreamEvents(piecesBaseUrl, query).catch(() => []),
+    fetchRecentSummarySnippets(piecesBaseUrl).catch(() => []),
   ]);
 
   const assetSnippets = assets.slice(0, MAX_ASSET_SNIPPETS).map((a) => {
@@ -73,7 +86,7 @@ async function gatherContext(pieces: PiecesClient, piecesBaseUrl: string, query:
     return snippet;
   });
 
-  return [...assetSnippets, ...events];
+  return [...summaries, ...assetSnippets, ...events];
 }
 
 function callGeminiViaAgy(prompt: string): Promise<string> {
