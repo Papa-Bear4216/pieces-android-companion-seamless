@@ -54,7 +54,24 @@ async function readQueue(): Promise<UsageEvent[]> {
   const { value } = await Preferences.get({ key: QUEUE_KEY });
   if (!value) return [];
   try {
-    return JSON.parse(value);
+    const raw = JSON.parse(value);
+    if (!Array.isArray(raw)) return [];
+    let backfilled = false;
+    const events: UsageEvent[] = raw.map((e) => {
+      if (!e || typeof e !== "object") return e;
+      if (!e.id) {
+        backfilled = true;
+        return {
+          ...e,
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+        };
+      }
+      return e;
+    });
+    if (backfilled) {
+      Preferences.set({ key: QUEUE_KEY, value: JSON.stringify(events) }).catch(() => {});
+    }
+    return events;
   } catch {
     return [];
   }
@@ -113,7 +130,7 @@ export async function replaceQueue(events: UsageEvent[]): Promise<void> {
   });
 }
 
-/** Removes sent events by ID (or falls back to count). Only call after a confirmed 2xx report. */
+/** Removes sent events by ID or type/timestamp fingerprint. Only call after a confirmed 2xx report. */
 export async function clearSentEvents(sent: Array<string | UsageEvent> | number): Promise<void> {
   return withQueueLock(async () => {
     const queue = await readQueue();
@@ -123,17 +140,32 @@ export async function clearSentEvents(sent: Array<string | UsageEvent> | number)
       return;
     }
 
-    const idsToRemove = new Set(
-      sent.map((item) => (typeof item === "string" ? item : item.id)).filter((id): id is string => Boolean(id))
-    );
+    const idsToRemove = new Set<string>();
+    const fingerprintsToRemove = new Set<string>();
 
-    if (idsToRemove.size === 0) {
-      // If none had ids, slice by count of sent items as fallback
+    for (const item of sent) {
+      if (typeof item === "string") {
+        idsToRemove.add(item);
+      } else if (item && typeof item === "object") {
+        if (item.id) idsToRemove.add(item.id);
+        if (item.type && item.timestamp) {
+          fingerprintsToRemove.add(`${item.type}:${item.timestamp}`);
+        }
+      }
+    }
+
+    if (idsToRemove.size === 0 && fingerprintsToRemove.size === 0) {
+      // If none had ids or fingerprints, slice by count of sent items as fallback
       await writeQueue(queue.slice(sent.length));
       return;
     }
 
-    const remaining = queue.filter((e) => !e.id || !idsToRemove.has(e.id));
+    const remaining = queue.filter((e) => {
+      if (e.id && idsToRemove.has(e.id)) return false;
+      if (e.type && e.timestamp && fingerprintsToRemove.has(`${e.type}:${e.timestamp}`)) return false;
+      return true;
+    });
+
     await writeQueue(remaining);
   });
 }

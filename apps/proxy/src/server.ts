@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { appendFile, mkdir } from "node:fs/promises";
+import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { Agent, setGlobalDispatcher } from "undici";
 import { PiecesClient, AskResult } from "@pieces-android/pieces-api";
@@ -91,6 +91,38 @@ const ASSETS_TIMEOUT_MS = 30000;
 const USAGE_LOG_PATH =
   process.env.USAGE_LOG_PATH ?? `${process.env.USERPROFILE ?? process.env.HOME}\\.claude\\pieces-usage-log.jsonl`;
 const MAX_EVENTS_PER_BATCH = 500;
+
+// Deduplication cache for /mobile/usage-report: prevents replayed client batches
+// from re-appending duplicate lines to USAGE_LOG_PATH or duplicate seeding to PiecesOS/Mem0.
+const MAX_SEEN_USAGE_EVENTS = 10000;
+const seenUsageFingerprints = new Set<string>();
+
+function getUsageFingerprint(e: any): string {
+  if (e.id) return `id:${e.id}`;
+  const parts = [e.type, e.timestamp, e.screen, e.query, e.package, e.result];
+  return `fp:${parts.filter(Boolean).join("|")}`;
+}
+
+async function preloadUsageFingerprints(): Promise<void> {
+  try {
+    const content = await readFile(USAGE_LOG_PATH, "utf-8");
+    const lines = content.trim().split("\n");
+    const start = Math.max(0, lines.length - MAX_SEEN_USAGE_EVENTS);
+    for (let i = start; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      try {
+        const parsed = JSON.parse(line);
+        seenUsageFingerprints.add(getUsageFingerprint(parsed));
+      } catch {
+        // Skip unparseable lines
+      }
+    }
+  } catch {
+    // Log file does not exist yet; starts empty
+  }
+}
+void preloadUsageFingerprints();
 // Guards against a pathological batch (500 events each carrying a large
 // text-node dump — a webview or scrollable list can produce tens of KB per
 // event) stalling the proxy on body accumulation before the event-count
@@ -285,8 +317,25 @@ const server = createServer(async (req, res) => {
     }
     try {
       await mkdir(dirname(USAGE_LOG_PATH), { recursive: true });
-      const lines = (events as any[]).map((e) => JSON.stringify(e)).join("\n") + "\n";
-      await appendFile(USAGE_LOG_PATH, lines, "utf-8");
+
+      // Deduplicate against seen fingerprints backstop
+      const freshEvents: any[] = [];
+      for (const e of events as any[]) {
+        const fp = getUsageFingerprint(e);
+        if (!seenUsageFingerprints.has(fp)) {
+          seenUsageFingerprints.add(fp);
+          if (seenUsageFingerprints.size > MAX_SEEN_USAGE_EVENTS) {
+            const oldest = seenUsageFingerprints.values().next().value;
+            if (oldest) seenUsageFingerprints.delete(oldest);
+          }
+          freshEvents.push(e);
+        }
+      }
+
+      if (freshEvents.length > 0) {
+        const lines = freshEvents.map((e) => JSON.stringify(e)).join("\n") + "\n";
+        await appendFile(USAGE_LOG_PATH, lines, "utf-8");
+      }
       
       // Batch consecutive same-package system_telemetry events in this
       // request into a single seed instead of one seed call per event — a
@@ -304,7 +353,7 @@ const server = createServer(async (req, res) => {
         return match ? match[1] : "unknown";
       };
 
-      const telemetryEvents = (events as TelemetryEvent[]).filter((e) => e.type === "system_telemetry");
+      const telemetryEvents = (freshEvents as TelemetryEvent[]).filter((e) => e.type === "system_telemetry");
       const batches: TelemetryEvent[][] = [];
       for (const e of telemetryEvents) {
         const last = batches[batches.length - 1];

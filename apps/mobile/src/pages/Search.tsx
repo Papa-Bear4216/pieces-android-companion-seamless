@@ -9,7 +9,7 @@ type State =
   | { kind: "results"; hits: SearchHit[]; serverSkipped: boolean; fallback: boolean }
   | { kind: "error"; message: string };
 
-const DEBOUNCE_MS = 300;
+const DEBOUNCE_MS = 400;
 
 // Server hits carry human-readable timestamps ("3 days ago"); local hits carry
 // ISO strings. Format ISO strings, pass anything else through unchanged.
@@ -25,16 +25,23 @@ export default function Search() {
   const [state, setState] = useState<State>({ kind: "idle" });
   const [expanded, setExpanded] = useState<number | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const activeRequestId = useRef(0);
 
   const run = useCallback(async (q: string, sort = sortMode) => {
     const trimmed = q.trim();
     if (!trimmed) {
+      activeRequestId.current++;
       setState({ kind: "idle" });
       return;
     }
+    const reqId = ++activeRequestId.current;
     setState({ kind: "searching" });
     try {
       const result = await semanticSearch(trimmed, { sort });
+      if (reqId !== activeRequestId.current) {
+        // Stale search response superseded by a newer query
+        return;
+      }
       setState({
         kind: "results",
         hits: result.hits,
@@ -51,6 +58,7 @@ export default function Search() {
         timestamp: new Date().toISOString(),
       });
     } catch (err) {
+      if (reqId !== activeRequestId.current) return;
       setState({ kind: "error", message: err instanceof Error ? err.message : String(err) });
     }
   }, [sortMode]);
@@ -69,15 +77,24 @@ export default function Search() {
   function onChange(value: string) {
     setQuery(value);
     clearTimeout(timer.current);
+    if (!value.trim()) {
+      activeRequestId.current++;
+      setState({ kind: "idle" });
+      return;
+    }
     timer.current = setTimeout(() => run(value), DEBOUNCE_MS);
   }
 
   function onSubmit() {
     clearTimeout(timer.current);
-    run(query);
+    if (query.trim()) {
+      run(query);
+    }
   }
 
   function clearQuery() {
+    clearTimeout(timer.current);
+    activeRequestId.current++;
     setQuery("");
     setState({ kind: "idle" });
   }

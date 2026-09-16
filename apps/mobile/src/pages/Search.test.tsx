@@ -92,4 +92,76 @@ describe("Search page", () => {
     await type("x");
     await waitFor(() => expect(screen.getByRole("button", { name: /retry/i })).toBeTruthy());
   });
+
+  test("debounces rapid keystrokes so only the final query executes and logs", async () => {
+    vi.useFakeTimers();
+    vi.mocked(semanticSearch).mockResolvedValue({ hits: [], serverSkipped: false, mode: "relevant" });
+
+    render(<Search />);
+    const input = screen.getByPlaceholderText(/search/i);
+
+    // Rapid keystrokes: M -> Mo -> Mov -> Movie without pressing enter
+    fireEvent.change(input, { target: { value: "M" } });
+    vi.advanceTimersByTime(100);
+    fireEvent.change(input, { target: { value: "Mo" } });
+    vi.advanceTimersByTime(100);
+    fireEvent.change(input, { target: { value: "Mov" } });
+    vi.advanceTimersByTime(100);
+    fireEvent.change(input, { target: { value: "Movie" } });
+
+    // No search call should have happened yet
+    expect(semanticSearch).not.toHaveBeenCalled();
+
+    // Advance beyond 400ms debounce
+    await vi.advanceTimersByTimeAsync(450);
+
+    expect(semanticSearch).toHaveBeenCalledTimes(1);
+    expect(semanticSearch).toHaveBeenCalledWith("Movie", expect.anything());
+    expect(recordEvent).toHaveBeenCalledTimes(1);
+    expect(recordEvent).toHaveBeenCalledWith(expect.objectContaining({ query: "Movie" }));
+
+    vi.useRealTimers();
+  });
+
+  test("discards slow in-flight response if superseded by a newer query", async () => {
+    let resolveFirst: (val: any) => void;
+    const firstPromise = new Promise((resolve) => {
+      resolveFirst = resolve;
+    });
+
+    vi.mocked(semanticSearch)
+      .mockImplementationOnce(() => firstPromise as any)
+      .mockResolvedValueOnce({
+        hits: [{ text: "cats result", score: 0.9, timestamp: "2026-02-01T00:00:00Z", source: "local" }],
+        serverSkipped: false,
+        mode: "relevant",
+      });
+
+    render(<Search />);
+    const input = screen.getByPlaceholderText(/search/i);
+
+    // Trigger first search
+    fireEvent.change(input, { target: { value: "dog" } });
+    fireEvent.click(screen.getByRole("button", { name: /search/i }));
+
+    // Trigger second search immediately before first finishes
+    fireEvent.change(input, { target: { value: "cats" } });
+    fireEvent.click(screen.getByRole("button", { name: /search/i }));
+
+    await waitFor(() => expect(screen.getByText("cats result")).toBeTruthy());
+
+    // Now first search finishes with old results
+    resolveFirst!({
+      hits: [{ text: "dog result", score: 0.9, timestamp: "2026-02-01T00:00:00Z", source: "local" }],
+      serverSkipped: false,
+      mode: "relevant",
+    });
+
+    // Verify screen still shows "cats result" and not clobbered by "dog result"
+    expect(screen.queryByText("dog result")).toBeNull();
+    expect(screen.getByText("cats result")).toBeTruthy();
+    // Only the winning query was recorded
+    expect(recordEvent).toHaveBeenCalledWith(expect.objectContaining({ query: "cats" }));
+    expect(recordEvent).not.toHaveBeenCalledWith(expect.objectContaining({ query: "dog" }));
+  });
 });
