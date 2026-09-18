@@ -33,7 +33,7 @@ function Test-ProxyHealthy {
 }
 
 $PiecesHealthUrl = 'http://127.0.0.1:39300/.well-known/health'
-$PiecesAppId    = 'com.MeshIntelligentTechnologi.PiecesOS_84gz00a5z79wr!osserver'
+$PiecesAppId    = 'MeshIntelligentTechnologi.PiecesOS_xpmeezj2q5frg!osserver'
 
 function Test-PiecesHealthy {
     try {
@@ -72,7 +72,10 @@ if (-not $piecesOk) {
         }
     }
     if ($shouldRelaunch) {
-        $aliasPath = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\com.MeshIntelligentTechnologi.PiecesOS_84gz00a5z79wr\os_server.exe'
+        $aliasPath = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\MeshIntelligentTechnologi.PiecesOS_xpmeezj2q5frg\os_server.exe'
+        if (-not (Test-Path $aliasPath)) {
+            $aliasPath = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\os_server.exe'
+        }
         if (Test-Path $aliasPath) {
             Log "launching Pieces OS via AppExecutionAlias: $aliasPath"
             try {
