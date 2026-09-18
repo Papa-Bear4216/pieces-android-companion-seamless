@@ -1,6 +1,6 @@
 # pieces-android: Fork Reconciliation & Merge Plan
 
-**Status:** Ready for manual merge execution  
+**Status:** COMPLETED & VERIFIED (2026-09-18)  
 **Target:** Unified codebase combining on-device semantic search (`shizuku-fix`) with automatic Plan A/B remote gateway failover (`shizuku-monitor`).
 
 ---
@@ -143,17 +143,17 @@ export async function flushUsageEvents(): Promise<void> {
 
 ## 5. Step-by-Step Merge Execution Checklist
 
-1. [ ] **Consolidate Canonical Git Root**:
-   - Establish `~/Desktop/projects/pieces-android` as the single canonical repository.
-   - Add `shizuku-monitor` as a git remote: `git remote add monitor <path-to-monitor>`.
-2. [ ] **Import Non-Conflicting Assets**:
-   - Copy `config.ts` (multi-target) from `monitor`.
-   - Copy `api.ts` (`authedFetch` failover) from `monitor`.
-   - Ensure `semanticSearch/`, `captureIndex/`, `textEmbedder/`, `triageQueue/`, and `Search.tsx` from `fix` remain intact.
-3. [ ] **Apply Hardened `flush.ts` and `usage.ts`**:
-   - Implement the canonical `flush.ts` defined in §3.
-   - Implement `withQueueLock` and `patchTriagedEvents` in `usage.ts`.
-4. [ ] **Validate Test Suite**:
-   - Run Vitest: `npm run test` (all 36+ tests passing).
-   - Add concurrency test verifying parallel `recordEvent` and `clearSentEvents` calls.
-   - Run production build: `npm run build` (`tsc -b && vite build`).
+1. [x] **Consolidate Canonical Git Root**:
+   - `C:\Users\micha\projects\pieces-android-shizuku-fix` on `master` is verified as the canonical unified repository.
+   - `shizuku-master` branch verified as an ancestor of `master`.
+2. [x] **Import Non-Conflicting Assets**:
+   - `config.ts` (multi-target connection) verified.
+   - `api.ts` (`authedFetch` failover) verified.
+   - `semanticSearch/`, `captureIndex/`, `textEmbedder/`, `triageQueue/`, and `Search.tsx` intact.
+3. [x] **Apply Hardened `flush.ts` and `usage.ts`**:
+   - Canonical `flush.ts` implemented with `isFlushing` mutex and triage prefix stop.
+   - `withQueueLock`, ID-based `clearSentEvents`, and `patchTriagedEvents` implemented in `usage.ts`.
+4. [x] **Validate Test Suite**:
+   - Vitest: 6 test files, 45 tests passing.
+   - Production build: `npm --prefix apps/mobile run build` (`tsc -b && vite build`) passing cleanly.
+
