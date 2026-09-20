@@ -2,15 +2,22 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { fileURLToPath } from 'node:url'
-import { realpathSync } from 'node:fs'
+import path from 'node:path'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 // https://vite.dev/config/
 export default defineConfig({
-  root: realpathSync(process.cwd()),
+  root: __dirname,
   plugins: [react()],
+  server: {
+    fs: {
+      allow: [__dirname, path.resolve(__dirname, '../..')],
+    },
+  },
   test: {
     environment: 'jsdom',
-    setupFiles: [fileURLToPath(new URL('./src/test/setup.ts', import.meta.url))],
+    setupFiles: [path.resolve(__dirname, 'src/test/setup.ts')],
     globals: true,
   },
 })

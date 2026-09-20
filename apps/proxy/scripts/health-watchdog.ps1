@@ -52,26 +52,27 @@ if (-not $piecesOk) {
 }
 
 if (-not $piecesOk) {
-    Log "PiecesOS unhealthy on port 39300"
-    $osProc = Get-Process -Name "os_server" -ErrorAction SilentlyContinue | Select-Object -First 1
-    $shouldRelaunch = $true
-    if ($osProc) {
+    Log "PiecesOS not yet responding on port 39300"
+    $osProcs = @(Get-Process -Name "os_server" -ErrorAction SilentlyContinue)
+    # Prefer interactive session process (SessionId > 0)
+    $activeProc = $osProcs | Where-Object { $_.SessionId -gt 0 } | Select-Object -First 1
+    if (-not $activeProc -and $osProcs.Count -gt 0) {
+        $activeProc = $osProcs[0]
+    }
+
+    if ($activeProc) {
         try {
-            $uptime = (Get-Date) - $osProc.StartTime
-            # PiecesOS has a known 20-30s slow-bind bug after launch; allow 75s grace period under load
-            if ($uptime.TotalSeconds -lt 75) {
-                Log "os_server PID $($osProc.Id) started $([int]$uptime.TotalSeconds)s ago (within 75s boot grace) - waiting"
-                $shouldRelaunch = $false
+            $uptime = (Get-Date) - $activeProc.StartTime
+            $uptimeSec = [int]$uptime.TotalSeconds
+            if ($uptimeSec -lt 120) {
+                Log "os_server PID $($activeProc.Id) initializing Couchbase shards (uptime ${uptimeSec}s, Session $($activeProc.SessionId)) - waiting"
             } else {
-                Log "killing wedged os_server PID $($osProc.Id) (running $([int]$uptime.TotalSeconds)s without binding port)"
-                Stop-Process -Id $osProc.Id -Force -ErrorAction SilentlyContinue
-                Start-Sleep -Seconds 2
+                Log "WARNING: os_server PID $($activeProc.Id) running for ${uptimeSec}s without binding port 39300. Couchbase recovery or manual restart required."
             }
         } catch {
-            Log "error inspecting os_server process: $($_.Exception.Message)"
+            Log "os_server process inspection failed: $($_.Exception.Message)"
         }
-    }
-    if ($shouldRelaunch) {
+    } else {
         $aliasPath = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\MeshIntelligentTechnologi.PiecesOS_xpmeezj2q5frg\os_server.exe'
         if (-not (Test-Path $aliasPath)) {
             $aliasPath = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\os_server.exe'
@@ -85,9 +86,9 @@ if (-not $piecesOk) {
                 Log "failed to launch Pieces OS via alias: $($_.Exception.Message)"
             }
         } else {
-            Log "launching Pieces OS Store package via explorer"
+            Log "os_server process is not running. Issuing launch via explorer shell:AppsFolder..."
             try {
-                Start-Process "explorer.exe" "shell:AppsFolder\$PiecesAppId"
+                Start-Process "explorer.exe" -ArgumentList "shell:AppsFolder\$PiecesAppId"
                 Log "Pieces OS launch command issued"
             } catch {
                 Log "failed to launch Pieces OS: $($_.Exception.Message)"
