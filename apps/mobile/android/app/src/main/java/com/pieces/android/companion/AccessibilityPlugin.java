@@ -36,6 +36,7 @@ public class AccessibilityPlugin extends Plugin {
     @Override
     public void load() {
         super.load();
+        NativeTelemetrySync.warmUpDatabaseAsync(getContext());
         // Bridges the accessibility service's debounced captures to JS via a
         // Capacitor event. Registered once per plugin instance; the service
         // only calls this if passive mode is on (checked on its side too).
@@ -549,6 +550,32 @@ public class AccessibilityPlugin extends Plugin {
         } catch (Exception e) {
             call.reject("Failed to retrieve accessibility buffer", e);
         }
+    }
+
+    @PluginMethod
+    public void getOutboxStatus(PluginCall call) {
+        NativeTelemetrySync.getOutboxStatusAsync(getContext(), (pending, isFlushing, dropped, isReady) -> {
+            JSObject ret = new JSObject();
+            ret.put("pending", pending);
+            ret.put("isFlushing", isFlushing);
+            ret.put("dropped", dropped);
+            ret.put("isReady", isReady);
+            call.resolve(ret);
+        });
+    }
+
+    @PluginMethod
+    public void flushOutbox(PluginCall call) {
+        String status = NativeTelemetrySync.flushAsync(getContext(), true);
+        NativeTelemetrySync.getOutboxStatusAsync(getContext(), (pending, isFlushing, dropped, isReady) -> {
+            JSObject ret = new JSObject();
+            ret.put("status", status);
+            ret.put("pending", pending);
+            ret.put("isFlushing", isFlushing);
+            ret.put("dropped", dropped);
+            ret.put("isReady", isReady);
+            call.resolve(ret);
+        });
     }
 
     private SharedPreferences getPrefs() {

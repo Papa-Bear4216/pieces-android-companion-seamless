@@ -102,6 +102,12 @@ public class PiecesAccessibilityService extends AccessibilityService {
             recentPushHashes.addLast(hash);
             while (recentPushHashes.size() > DEDUPE_HISTORY_SIZE) recentPushHashes.removeFirst();
 
+            String appLabel = labelCache.get(packageName);
+            if (appLabel == null) appLabel = packageName;
+
+            // Native durable outbox + background HTTP sync (runs independently of whether UI app is open)
+            NativeTelemetrySync.queueScreenCapture(PiecesAccessibilityService.this, packageName, appLabel, text);
+
             PassiveCaptureListener listener = passiveListener;
             if (listener != null) listener.onCapture(packageName, text);
         };
@@ -225,4 +231,29 @@ public class PiecesAccessibilityService extends AccessibilityService {
     public void onInterrupt() {
         // Required method, ignored for now
     }
+
+    private static final long PERIODIC_SYNC_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+    private final Handler syncHandler = new Handler(Looper.getMainLooper());
+    private final Runnable periodicSyncRunnable = new Runnable() {
+        @Override
+        public void run() {
+            NativeTelemetrySync.flushAsync(PiecesAccessibilityService.this);
+            syncHandler.postDelayed(this, PERIODIC_SYNC_INTERVAL_MS);
+        }
+    };
+
+    @Override
+    protected void onServiceConnected() {
+        super.onServiceConnected();
+        NativeTelemetrySync.warmUpDatabaseAsync(this);
+        NativeTelemetrySync.flushAsync(this);
+        syncHandler.postDelayed(periodicSyncRunnable, PERIODIC_SYNC_INTERVAL_MS);
+    }
+
+    @Override
+    public void onDestroy() {
+        syncHandler.removeCallbacks(periodicSyncRunnable);
+        super.onDestroy();
+    }
 }
+

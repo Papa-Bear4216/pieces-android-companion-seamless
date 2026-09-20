@@ -15,6 +15,7 @@ import { registerPlugin, Capacitor } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
 
 const ShizukuMonitor = registerPlugin<any>('ShizukuMonitor');
+const AccessibilityScanner = registerPlugin<any>('AccessibilityScanner');
 
 const USAGE_FLUSH_INTERVAL_MS = 5 * 60 * 1000;
 
@@ -28,16 +29,17 @@ export default function App() {
   const [shizukuOffline, setShizukuOffline] = useState(false);
 
   useEffect(() => {
-    // Re-enable the accessibility service via Shizuku on launch if it got
-    // dropped (e.g. after a reboot) — but only for users who opted into the
-    // Shizuku toolkit specifically via Setup. Screen context on its own
-    // (isScreenContextEnabled) doesn't need this at all: without Shizuku,
-    // Accessibility is a normal Android Settings toggle that the user
-    // enables manually once, and it just stays enabled — no re-arming logic
-    // needed since nothing here can silently disable it.
+    // Re-enable the accessibility service via Shizuku on launch only if it's
+    // not already enabled natively, and only for users who opted into Shizuku.
     async function checkShizuku() {
       const enabled = await isShizukuToolkitEnabled();
       if (!enabled) return;
+
+      // If Accessibility is already active in Android Settings, Shizuku is optional.
+      try {
+        const acc = await AccessibilityScanner.isAccessibilityServiceEnabled();
+        if (acc?.enabled) return;
+      } catch {}
 
       try {
         const res = await ShizukuMonitor.checkPermission();

@@ -55,6 +55,10 @@ export async function grantSmsViaShizuku(): Promise<{ sms: boolean; contacts: bo
   return { sms: !!r.granted, contacts: !!r.contactsGranted };
 }
 
+export async function openSmsAppSettings(): Promise<void> {
+  await SmsReader.openAppSettings();
+}
+
 // --- Contact allowlist --------------------------------------------------
 
 export async function listSmsContacts(): Promise<SmsContact[]> {

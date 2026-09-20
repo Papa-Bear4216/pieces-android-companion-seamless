@@ -3,6 +3,7 @@ package com.pieces.android.companion;
 import android.Manifest;
 import android.content.ContentResolver;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
@@ -88,6 +89,16 @@ public class SmsPlugin extends Plugin {
                 call.reject("Failed to grant permissions: " + e.getMessage());
             }
         });
+    }
+
+    /** Fallback: open app details settings screen for manual permission grants (no Shizuku needed). */
+    @PluginMethod
+    public void openAppSettings(PluginCall call) {
+        Intent intent = new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+        intent.setData(Uri.fromParts("package", getContext().getPackageName(), null));
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        getContext().startActivity(intent);
+        call.resolve();
     }
 
     /**

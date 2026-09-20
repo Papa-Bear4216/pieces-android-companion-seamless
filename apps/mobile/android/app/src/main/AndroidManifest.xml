@@ -68,11 +68,19 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+
+        <!-- Persistent background sync job to drain outbox across process restarts -->
+        <service
+            android:name=".TelemetrySyncJobService"
+            android:permission="android.permission.BIND_JOB_SERVICE"
+            android:exported="true" />
     </application>
 
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Runtime-requested via BarcodeScanner.requestPermissions() in Setup's
          "Scan to Connect" flow — declaring it here just makes it requestable. -->
     <uses-permission android:name="android.permission.CAMERA" />

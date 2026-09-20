@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { registerPlugin } from "@capacitor/core";
+import { App as CapacitorApp } from "@capacitor/app";
 import { BarcodeScanner } from "@capacitor-mlkit/barcode-scanning";
 
 const ShizukuMonitor = registerPlugin<any>('ShizukuMonitor');
@@ -22,7 +23,7 @@ import {
   startNotificationCaptureListener,
 } from "../lib/notificationCapture";
 import {
-  smsPermissions, grantSmsViaShizuku, runSmsBackfill, resetSmsBackfillToRecent,
+  smsPermissions, grantSmsViaShizuku, openSmsAppSettings, runSmsBackfill, resetSmsBackfillToRecent,
   listSmsContacts, getSmsAllowlist, setSmsAllowlist, type SmsContact,
 } from "../lib/smsBackfill";
 import { Switch } from "../components/Switch";
@@ -80,6 +81,37 @@ export default function Setup() {
     refreshSmsState();
     recordEvent({ type: "screen_view", screen: "setup", timestamp: new Date().toISOString() });
     flushUsageEvents();
+
+    let lastResume = 0;
+    const onResume = () => {
+      const now = Date.now();
+      if (now - lastResume < 500) return;
+      lastResume = now;
+      AccessibilityScanner.isAccessibilityServiceEnabled()
+        .then((r: any) => setAccessibilityGranted(r.enabled))
+        .catch(() => {});
+      refreshNotifState();
+      refreshSmsState();
+    };
+
+    let disposed = false;
+    let appListenerHandle: { remove: () => Promise<void> } | undefined;
+    CapacitorApp.addListener("appStateChange", ({ isActive }) => {
+      if (isActive) onResume();
+    }).then((handle) => {
+      if (disposed) {
+        handle.remove();
+      } else {
+        appListenerHandle = handle;
+      }
+    }).catch(() => {});
+
+    window.addEventListener("focus", onResume);
+    return () => {
+      disposed = true;
+      window.removeEventListener("focus", onResume);
+      appListenerHandle?.remove();
+    };
   }, []);
 
   async function refreshSmsState() {
@@ -293,6 +325,7 @@ export default function Setup() {
           timestamp: new Date().toISOString(),
         });
         flushUsageEvents();
+        AccessibilityScanner.flushOutbox().catch(() => {});
       } finally {
         setChecking(false);
       }
@@ -555,9 +588,14 @@ export default function Setup() {
               <p className="status-error" style={{ fontSize: 13, margin: "0 0 8px" }}>
                 SMS access not granted yet.
               </p>
-              <button onClick={handleGrantSms} disabled={smsBusy}>
-                {smsBusy ? "Granting…" : "Grant via Shizuku"}
-              </button>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={handleGrantSms} disabled={smsBusy}>
+                  {smsBusy ? "Granting…" : "Grant via Shizuku"}
+                </button>
+                <button className="secondary" onClick={() => openSmsAppSettings()}>
+                  Open Settings
+                </button>
+              </div>
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -569,9 +607,14 @@ export default function Setup() {
                 Allowlist: <strong>{smsAllow.size}</strong> number{smsAllow.size === 1 ? "" : "s"} selected.
               </p>
               {!contactsGranted && (
-                <p className="status-error" style={{ fontSize: 12 }}>
-                  Contacts not readable — tap "Grant via Shizuku" again to add READ_CONTACTS.
-                </p>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <p className="status-error" style={{ fontSize: 12, margin: 0 }}>
+                    Contacts not readable — grant permission in Android Settings or tap Shizuku.
+                  </p>
+                  <button className="secondary pill" style={{ fontSize: 11, padding: "2px 8px" }} onClick={() => openSmsAppSettings()}>
+                    Settings
+                  </button>
+                </div>
               )}
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
                 <button className="secondary" onClick={handleOpenPicker} disabled={smsBusy || !contactsGranted}>

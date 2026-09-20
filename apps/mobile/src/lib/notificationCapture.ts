@@ -1,4 +1,4 @@
-import { registerPlugin } from "@capacitor/core";
+import { Capacitor, registerPlugin } from "@capacitor/core";
 import { recordEvent } from "./usage";
 
 const NotificationCapture = registerPlugin<any>("NotificationCapture");
@@ -25,11 +25,10 @@ export function startNotificationCaptureListener(): void {
   if (started) return;
   started = true;
 
-  // Captures arrive already deduped/denylist-filtered on the Java side
-  // (NotificationCaptureService). Forward each into the same untriaged
-  // usage-event pipeline as passive screen captures — triageQueue() runs
-  // the on-device summarization pass later (the only time AICore works),
-  // and is the only thing that flushes. Nothing leaves the device from here.
+  // On native Android, NotificationCaptureService automatically writes notification
+  // events to the native durable outbox (telemetry_outbox.jsonl) and flushes them
+  // asynchronously in the background. When this companion app UI is open,
+  // the event also arrives here to update the live UI status.
   NotificationCapture.addListener(
     "notification",
     async (data: { package: string; appLabel: string; title: string; text: string; postedAt: number }) => {
@@ -37,16 +36,17 @@ export function startNotificationCaptureListener(): void {
         ? new Date(data.postedAt).toISOString()
         : new Date().toISOString();
 
-      const titleLine = data.title ? `TITLE: ${data.title}\n` : "";
-      await recordEvent({
-        type: "system_telemetry",
-        screen: "background",
-        // Prefix parsed by apps/proxy/src/seeder.ts summarizeTelemetry.
-        telemetry: `Notification from ${data.appLabel} (${data.package})\n${titleLine}${data.text}`,
-        package: data.package,
-        app_label: data.appLabel,
-        timestamp,
-      });
+      if (!Capacitor.isNativePlatform()) {
+        const titleLine = data.title ? `TITLE: ${data.title}\n` : "";
+        await recordEvent({
+          type: "system_telemetry",
+          screen: "background",
+          telemetry: `Notification from ${data.appLabel} (${data.package})\n${titleLine}${data.text}`,
+          package: data.package,
+          app_label: data.appLabel,
+          timestamp,
+        });
+      }
 
       lastCapture = { pkg: data.package, appLabel: data.appLabel, at: timestamp };
       for (const cb of subscribers) cb(lastCapture);

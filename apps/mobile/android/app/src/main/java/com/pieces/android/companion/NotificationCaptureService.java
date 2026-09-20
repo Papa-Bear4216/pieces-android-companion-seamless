@@ -98,6 +98,16 @@ public class NotificationCaptureService extends NotificationListenerService {
 
         final NotificationCaptureListener l = listener;
         if (l != null) l.onNotification(pkg, label, title, body, sbn.getPostTime());
+
+        // Native durable outbox + background HTTP sync (independent of whether UI app is open)
+        NativeTelemetrySync.queueNotification(this, pkg, label, title, body, sbn.getPostTime());
+    }
+
+    @Override
+    public void onListenerConnected() {
+        super.onListenerConnected();
+        NativeTelemetrySync.warmUpDatabaseAsync(this);
+        NativeTelemetrySync.flushAsync(this);
     }
 
     // We don't act on removals — forward-only by design.

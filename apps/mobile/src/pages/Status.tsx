@@ -6,7 +6,7 @@ import { flushUsageEvents } from "../lib/flush";
 import { isShizukuToolkitEnabled, isScreenContextEnabled } from "../lib/config";
 import { onPassiveCapture, getLastPassiveCapture, startPassiveCaptureListener } from "../lib/passiveCapture";
 import { withPlayCategoryFallback } from "../lib/playCategories";
-import { registerPlugin } from "@capacitor/core";
+import { Capacitor, registerPlugin } from "@capacitor/core";
 import { Switch } from "../components/Switch";
 import { RefreshIcon } from "../components/Icons";
 
@@ -247,15 +247,22 @@ export default function Status() {
     try {
       const res = await AccessibilityScanner.getActiveScreenText();
       if (res.status === "success") {
-        await recordEvent({
-          type: "system_telemetry",
-          screen: "background",
-          telemetry: `Package: ${res.package}\n\n${res.textNodes}`,
-          package: res.package,
-          app_label: res.appLabel,
-          timestamp: new Date().toISOString(),
-        });
-        await flushUsageEvents();
+        if (!Capacitor.isNativePlatform()) {
+          await recordEvent({
+            type: "system_telemetry",
+            screen: "background",
+            telemetry: `Package: ${res.package}\n\n${res.textNodes}`,
+            package: res.package,
+            app_label: res.appLabel,
+            timestamp: new Date().toISOString(),
+            triaged: false,
+          });
+          await flushUsageEvents();
+        } else {
+          // On native platform, PiecesAccessibilityService already queued the capture
+          // to NativeTelemetrySync. Force an immediate native outbox sync.
+          await AccessibilityScanner.flushOutbox();
+        }
         alert(`Captured & synced ${res.textNodes.length} characters from ${res.package}.`);
       } else {
         alert(res.status);
