@@ -1,38 +1,13 @@
-# pieces-android
+# Pieces-Android Companion - Seamless
 
-Android companion for PiecesOS — Status, Recent, Ask, and an optional privileged toolkit
-(Shizuku shell diagnostics + accessibility-based screen-text capture). Two ways to connect
-the core app, both live:
+Native Android companion for PiecesOS — Obsidian Glass UI, on-device Gemini Nano triage, zero-setup native Accessibility & Notification capture, and robust dual-path networking (Plan A LAN + Plan B remote gateway).
 
-- **Plan A (LAN)**: phone and PC on the same Wi-Fi, talking directly to a proxy on the PC.
-- **Plan B (remote)**: phone anywhere with internet, routed through a gateway on a host you
-  control over Tailscale back to the same PC — no inbound ports opened on the home network,
-  fails closed if the PC is offline/unreachable.
-
-## Optional: Shizuku toolkit (advanced, off by default)
-
-The app can optionally use [Shizuku](https://shizuku.rikka.app/) — a separate app you install
-yourself that grants ADB-level shell access without root — to run a small set of diagnostic
-commands (`dumpsys battery`, `pm list packages -3`, etc.) and, if you also grant Android's
-Accessibility permission, capture on-screen text **only from apps you explicitly select** in
-an in-app picker. Both are sent to your own PiecesOS instance as context.
-
-**This is off until you turn it on.** Nothing in this toolkit runs, and no permission is
-requested, until you flip the toggle in the Setup screen. When you do:
-
-- Shell commands are restricted to a fixed allowlist enforced in the Android app's Java code
-  (`ShizukuMonitorPlugin.ALLOWED_COMMANDS`), not just the UI — the WebView cannot run
-  arbitrary shell even if compromised.
-- Screen-text capture only reads from packages you've added to the allowlist via the app
-  picker (Status tab → "Choose allowed apps"). Known password-manager and banking app
-  packages are excluded from that picker outright and cannot be selected.
-- This still requires two separate manual grants on your end: installing Shizuku and
-  starting its daemon (wireless debugging or root), and enabling Android's Accessibility
-  service for this app in system Settings (or letting the app do it via Shizuku once you've
-  opted in).
-
-If you don't want any of this, ignore it — Status/Recent/Ask work fully without Shizuku or
-Accessibility ever being touched.
+- **100% Shizuku-Free & Seamless**: Runs purely through standard Android Accessibility and Notification Listener permissions. No wireless debugging pairing, no ADB scripts, and no background daemon crashes to manage.
+- **Dual-Path Zero-Loss Connection**:
+  - **Plan A (LAN)**: Blazing fast local proxy on your home Wi-Fi (`http://<lan-ip>:8787`).
+  - **Plan B (Remote)**: Automatic seamless failover through Tailscale gateway when on cellular or outside networks (`https://pieces.<domain>`).
+- **On-Device Local Intelligence**: Integrates with on-device Gemini Nano / AICore and on-device semantic embeddings for offline search, intelligent triage, and privacy-preserving context indexing.
+- **Durable Offline Outbox**: Capture events and screen context queue persistently in local Room SQLite storage and sync seamlessly the moment a connection to PiecesOS is available.
 
 ## No data lost if the connection drops
 

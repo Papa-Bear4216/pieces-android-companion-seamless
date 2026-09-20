@@ -1,5 +1,6 @@
 {
-  "name": "pieces-android",
+  "name": "pieces-android-companion-seamless",
+  "description": "Pieces-Android Companion - Seamless",
   "private": true,
   "version": "0.1.0",
   "workspaces": [

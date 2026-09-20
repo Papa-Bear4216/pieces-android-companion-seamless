@@ -3,13 +3,11 @@ import { registerPlugin } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
 import { BarcodeScanner } from "@capacitor-mlkit/barcode-scanning";
 
-const ShizukuMonitor = registerPlugin<any>('ShizukuMonitor');
 const AccessibilityScanner = registerPlugin<any>('AccessibilityScanner');
 
 import {
   getProxyBaseUrl, getProxyToken, setProxyBaseUrl, setProxyToken,
   getRemoteGatewayUrl, getRemoteGatewayToken, setRemoteGatewayUrl, setRemoteGatewayToken,
-  isShizukuToolkitEnabled, setShizukuToolkitEnabled,
   isScreenContextEnabled, setScreenContextEnabled,
 } from "../lib/config";
 import { checkProxyHealth, getStatus, HomeNodeUnreachableError } from "../lib/api";
@@ -19,15 +17,15 @@ import { parseConnectionQrPayload } from "../lib/connectionQr";
 import { decodeJwtForDisplay, formatExpiry } from "../lib/jwtDisplay";
 import {
   isNotificationListenerGranted, getNotificationCaptureConfig, setNotificationCapture,
-  grantNotificationListenerViaShizuku, openNotificationListenerSettings,
+  openNotificationListenerSettings,
   startNotificationCaptureListener,
 } from "../lib/notificationCapture";
 import {
-  smsPermissions, grantSmsViaShizuku, openSmsAppSettings, runSmsBackfill, resetSmsBackfillToRecent,
+  smsPermissions, openSmsAppSettings, runSmsBackfill, resetSmsBackfillToRecent,
   listSmsContacts, getSmsAllowlist, setSmsAllowlist, type SmsContact,
 } from "../lib/smsBackfill";
 import { Switch } from "../components/Switch";
-import { ScanIcon, CheckIcon } from "../components/Icons";
+import { ScanIcon, CheckIcon, WifiIcon, CloudIcon } from "../components/Icons";
 
 export default function Setup() {
   // Plan A (LAN)
@@ -39,7 +37,6 @@ export default function Setup() {
   const [checking, setChecking] = useState(false);
   const [result, setResult] = useState<"idle" | "ok" | "server-only" | "unreachable">("idle");
   const [scanError, setScanError] = useState<string | null>(null);
-  const [shizukuToolkit, setShizukuToolkit] = useState(false);
   const [screenContext, setScreenContext] = useState(false);
   const [accessibilityGranted, setAccessibilityGranted] = useState(false);
 
@@ -47,8 +44,6 @@ export default function Setup() {
   const [notifCapture, setNotifCapture] = useState(false);
   const [notifAllApps, setNotifAllApps] = useState(false);
   const [notifListenerGranted, setNotifListenerGranted] = useState(false);
-  const [notifBusy, setNotifBusy] = useState(false);
-  const [notifError, setNotifError] = useState<string | null>(null);
 
   // Part 2: SMS backfill (contact-allowlist model)
   const [smsGranted, setSmsGranted] = useState(false);
@@ -63,17 +58,16 @@ export default function Setup() {
 
   useEffect(() => {
     (async () => {
-      const [savedUrl, savedToken, savedRemoteUrl, savedRemoteToken, toolkitEnabled, contextEnabled] =
+      const [savedUrl, savedToken, savedRemoteUrl, savedRemoteToken, contextEnabled] =
         await Promise.all([
           getProxyBaseUrl(), getProxyToken(),
           getRemoteGatewayUrl(), getRemoteGatewayToken(),
-          isShizukuToolkitEnabled(), isScreenContextEnabled(),
+          isScreenContextEnabled(),
         ]);
       if (savedUrl) setBaseUrl(savedUrl);
       if (savedToken) setToken(savedToken);
       if (savedRemoteUrl) setRemoteUrl(savedRemoteUrl);
       if (savedRemoteToken) setRemoteToken(savedRemoteToken);
-      setShizukuToolkit(toolkitEnabled);
       setScreenContext(contextEnabled);
     })();
     AccessibilityScanner.isAccessibilityServiceEnabled().then((r: any) => setAccessibilityGranted(r.enabled));
@@ -144,32 +138,6 @@ export default function Setup() {
   async function handleToggleNotifAllApps(next: boolean) {
     setNotifAllApps(next);
     await setNotificationCapture(notifCapture, next);
-  }
-
-  async function handleGrantNotifListener() {
-    setNotifBusy(true);
-    setNotifError(null);
-    try {
-      await grantNotificationListenerViaShizuku();
-      await refreshNotifState();
-    } catch (e) {
-      setNotifError(e instanceof Error ? e.message : String(e));
-    }
-    setNotifBusy(false);
-  }
-
-  async function handleGrantSms() {
-    setSmsBusy(true);
-    setSmsError(null);
-    try {
-      const { sms, contacts: c } = await grantSmsViaShizuku();
-      setSmsGranted(sms);
-      setContactsGranted(c);
-      await refreshSmsState();
-    } catch (e) {
-      setSmsError(e instanceof Error ? e.message : String(e));
-    }
-    setSmsBusy(false);
   }
 
   async function handleOpenPicker() {
@@ -261,23 +229,6 @@ export default function Setup() {
     }
   }
 
-  async function handleToggleShizuku(next: boolean) {
-    setShizukuToolkit(next);
-    await setShizukuToolkitEnabled(next);
-    try {
-      await ShizukuMonitor.setToolkitEnabled({ enabled: next });
-    } catch (e) {
-      console.warn("[Shizuku] setToolkitEnabled failed", e);
-    }
-    if (next) {
-      try {
-        await ShizukuMonitor.enableAccessibilityService();
-      } catch (e) {
-        console.warn("[Shizuku] enableAccessibilityService failed (grant Shizuku permission first)", e);
-      }
-    }
-  }
-
   async function deepCheckAfterSave(): Promise<"ok" | "server-only"> {
     try {
       await getStatus();
@@ -362,20 +313,6 @@ export default function Setup() {
     setResult(await deepCheckAfterSave());
     setChecking(false);
 
-    if (shizukuToolkit) {
-      try {
-        const res = await ShizukuMonitor.executeCommand({ command: "dumpsys meminfo" });
-        await recordEvent({
-          type: "system_telemetry",
-          screen: "background",
-          telemetry: res.output,
-          timestamp: new Date().toISOString(),
-        });
-      } catch (e) {
-        console.warn("[Shizuku] Auto-init failed (Is the daemon started?)", e);
-      }
-    }
-
     await recordEvent({
       type: "setup_saved",
       screen: "setup",
@@ -410,63 +347,90 @@ export default function Setup() {
         {scanError && <p className="status-error" style={{ marginTop: 10, fontSize: 13 }}>{scanError}</p>}
       </div>
 
-      <fieldset>
-        <legend>Plan A — Home Wi-Fi (LAN Proxy)</legend>
-        <label>
-          LAN Proxy Address
-          <input
-            type="text"
-            placeholder="http://192.168.1.20:8787"
-            value={baseUrl}
-            onChange={(e) => setBaseUrl(e.target.value)}
-          />
-        </label>
-        <label style={{ marginBottom: 0 }}>
-          Bearer Token (from PC)
-          <input
-            type="password"
-            placeholder="Proxy bearer token"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-          />
-        </label>
-      </fieldset>
+      <div className="setup-card">
+        <div className="setup-card-header">
+          <div className="setup-card-title-group">
+            <div className="setup-card-icon lan">
+              <WifiIcon size={18} />
+            </div>
+            <div>
+              <div className="setup-card-title">Plan A — Home Wi-Fi</div>
+              <div className="setup-card-subtitle">Fast local proxy when connected to your home network</div>
+            </div>
+          </div>
+          <span className="badge">LAN</span>
+        </div>
+        <div className="setup-fields">
+          <div className="input-group">
+            <label className="input-label">LAN Proxy Address</label>
+            <input
+              type="text"
+              placeholder="http://192.168.1.20:8787"
+              value={baseUrl}
+              onChange={(e) => setBaseUrl(e.target.value)}
+            />
+          </div>
+          <div className="input-group">
+            <label className="input-label">Bearer Token (from PC)</label>
+            <input
+              type="password"
+              placeholder="Proxy bearer token"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+            />
+          </div>
+        </div>
+      </div>
 
-      <fieldset>
-        <legend>Plan B — Away (Remote Gateway)</legend>
-        <label>
-          Gateway URL
-          <input
-            type="text"
-            placeholder="https://pieces.yourdomain.com"
-            value={remoteUrl}
-            onChange={(e) => setRemoteUrl(e.target.value)}
-          />
-        </label>
-        <label style={{ marginBottom: 4 }}>
-          Device Token (from gateway enroll)
-          <input
-            type="password"
-            placeholder="Device JWT"
-            value={remoteToken}
-            onChange={(e) => setRemoteToken(e.target.value)}
-          />
-        </label>
-        {(() => {
-          const info = remoteToken ? decodeJwtForDisplay(remoteToken) : null;
-          if (!info?.expiresAt) return null;
-          const expired = info.expiresAt.getTime() < Date.now();
-          return (
-            <p className={`setup-note ${expired ? "status-error" : "hint"}`} style={{ fontSize: 12, margin: "6px 0 0" }}>
-              Device token {formatExpiry(info.expiresAt)}
-              {expired && " — re-enroll this device on the gateway."}
-            </p>
-          );
-        })()}
-      </fieldset>
+      <div className="setup-card">
+        <div className="setup-card-header">
+          <div className="setup-card-title-group">
+            <div className="setup-card-icon remote">
+              <CloudIcon size={18} />
+            </div>
+            <div>
+              <div className="setup-card-title">Plan B — Remote Gateway</div>
+              <div className="setup-card-subtitle">Automatic failover when away from home via Tailscale</div>
+            </div>
+          </div>
+          <span className="badge">Failover</span>
+        </div>
+        <div className="setup-fields">
+          <div className="input-group">
+            <label className="input-label">Gateway URL</label>
+            <input
+              type="text"
+              placeholder="https://pieces.yourdomain.com"
+              value={remoteUrl}
+              onChange={(e) => setRemoteUrl(e.target.value)}
+            />
+          </div>
+          <div className="input-group">
+            <label className="input-label">Device Token (from gateway enroll)</label>
+            <input
+              type="password"
+              placeholder="Device JWT"
+              value={remoteToken}
+              onChange={(e) => setRemoteToken(e.target.value)}
+            />
+          </div>
+          {(() => {
+            const info = remoteToken ? decodeJwtForDisplay(remoteToken) : null;
+            if (!info?.expiresAt) return null;
+            const expired = info.expiresAt.getTime() < Date.now();
+            return (
+              <p className={`setup-note ${expired ? "status-error" : "hint"}`} style={{ fontSize: 12, margin: "6px 0 0" }}>
+                Device token {formatExpiry(info.expiresAt)}
+                {expired && " — re-enroll this device on the gateway."}
+              </p>
+            );
+          })()}
+        </div>
+      </div>
 
-      <div style={{ marginTop: 16 }}>
+      <div style={{ marginTop: 18 }}>
         <button
+          className="primary-btn-large"
           onClick={handleTestAndSave}
           disabled={checking || (!(baseUrl && token) && !(remoteUrl && remoteToken))}
           style={{ width: "100%" }}
@@ -528,15 +492,6 @@ export default function Setup() {
 
       <div className="panel">
         <Switch
-          checked={shizukuToolkit}
-          onChange={handleToggleShizuku}
-          label="Enable Shizuku toolkit (advanced)"
-          description="Privileged diagnostics and automated accessibility re-arming via wireless debugging."
-        />
-      </div>
-
-      <div className="panel">
-        <Switch
           checked={notifCapture}
           onChange={handleToggleNotifCapture}
           label="Capture notifications"
@@ -553,17 +508,11 @@ export default function Setup() {
                 <p className="status-error" style={{ fontSize: 13, margin: "0 0 8px" }}>
                   Notification access not granted yet.
                 </p>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={handleGrantNotifListener} disabled={notifBusy}>
-                    {notifBusy ? "Granting…" : "Grant via Shizuku"}
-                  </button>
-                  <button className="secondary" onClick={() => openNotificationListenerSettings()}>
-                    Open Settings
-                  </button>
-                </div>
+                <button className="secondary" onClick={() => openNotificationListenerSettings()}>
+                  Open Settings
+                </button>
               </div>
             )}
-            {notifError && <p className="status-error" style={{ fontSize: 12 }}>{notifError}</p>}
             <Switch
               checked={notifAllApps}
               onChange={handleToggleNotifAllApps}
@@ -588,14 +537,9 @@ export default function Setup() {
               <p className="status-error" style={{ fontSize: 13, margin: "0 0 8px" }}>
                 SMS access not granted yet.
               </p>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={handleGrantSms} disabled={smsBusy}>
-                  {smsBusy ? "Granting…" : "Grant via Shizuku"}
-                </button>
-                <button className="secondary" onClick={() => openSmsAppSettings()}>
-                  Open Settings
-                </button>
-              </div>
+              <button className="secondary" onClick={() => openSmsAppSettings()}>
+                Open Settings
+              </button>
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -609,7 +553,7 @@ export default function Setup() {
               {!contactsGranted && (
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <p className="status-error" style={{ fontSize: 12, margin: 0 }}>
-                    Contacts not readable — grant permission in Android Settings or tap Shizuku.
+                    Contacts not readable — grant permission in Android Settings.
                   </p>
                   <button className="secondary pill" style={{ fontSize: 11, padding: "2px 8px" }} onClick={() => openSmsAppSettings()}>
                     Settings

@@ -3,22 +3,14 @@ import { useNavigate } from "react-router";
 import { getStatus, getCachedStatus, ProxyNotConfiguredError, HomeNodeUnreachableError } from "../lib/api";
 import { recordEvent } from "../lib/usage";
 import { flushUsageEvents } from "../lib/flush";
-import { isShizukuToolkitEnabled, isScreenContextEnabled } from "../lib/config";
+import { isScreenContextEnabled } from "../lib/config";
 import { onPassiveCapture, getLastPassiveCapture, startPassiveCaptureListener } from "../lib/passiveCapture";
 import { withPlayCategoryFallback } from "../lib/playCategories";
 import { Capacitor, registerPlugin } from "@capacitor/core";
 import { Switch } from "../components/Switch";
 import { RefreshIcon } from "../components/Icons";
 
-const ShizukuMonitor = registerPlugin<any>('ShizukuMonitor');
 const AccessibilityScanner = registerPlugin<any>('AccessibilityScanner');
-
-// Must exactly match ShizukuMonitorPlugin.ALLOWED_COMMANDS on the Java side —
-// that's the real enforcement point, this list just drives the UI.
-const PRESET_COMMANDS = [
-  "dumpsys battery", "dumpsys cpuinfo", "dumpsys meminfo",
-  "pm list packages -3", "ifconfig wlan0", "getprop ro.build.version.release",
-];
 
 type State =
   | { kind: "loading" }
@@ -34,8 +26,8 @@ const PASSIVE_MODE_CONFIRM_PHRASE = "I understand";
 export default function Status() {
   const navigate = useNavigate();
   const [state, setState] = useState<State>({ kind: "loading" });
-  const [toolkitEnabled, setToolkitEnabled] = useState(false);
   const [contextEnabled, setContextEnabled] = useState(false);
+  const [accessibilityGranted, setAccessibilityGranted] = useState(true);
   const [apps, setApps] = useState<AppEntry[]>([]);
   const [allowlist, setAllowlistState] = useState<Set<string>>(new Set());
   const [showPicker, setShowPicker] = useState(false);
@@ -69,6 +61,11 @@ export default function Status() {
 
   async function load() {
     setState({ kind: "loading" });
+    if (Capacitor.isNativePlatform()) {
+      AccessibilityScanner.isAccessibilityServiceEnabled()
+        .then(({ enabled }: { enabled: boolean }) => setAccessibilityGranted(enabled))
+        .catch(() => {});
+    }
     try {
       const { health, version } = await getStatus();
       setState({ kind: "ok", health, version });
@@ -90,8 +87,12 @@ export default function Status() {
 
   useEffect(() => {
     load();
-    isShizukuToolkitEnabled().then(setToolkitEnabled);
     isScreenContextEnabled().then(setContextEnabled);
+    if (Capacitor.isNativePlatform()) {
+      AccessibilityScanner.isAccessibilityServiceEnabled()
+        .then(({ enabled }: { enabled: boolean }) => setAccessibilityGranted(enabled))
+        .catch(() => {});
+    }
     AccessibilityScanner.getPassiveModeEnabled().then((r: any) => setPassiveMode(r.enabled));
     // Load the real saved allowlist on mount — without this, allowlist stays
     // the empty Set() default until the user opens the app picker at least
@@ -227,22 +228,6 @@ export default function Status() {
     await applyAllowlist(new Set());
   }
 
-  async function runPreset(cmd: string) {
-    try {
-      const res = await ShizukuMonitor.executeCommand({ command: cmd });
-      await recordEvent({
-        type: "system_telemetry",
-        screen: "background",
-        telemetry: `Command: ${cmd}\n\n${res.output}`,
-        timestamp: new Date().toISOString(),
-      });
-      await flushUsageEvents();
-      alert("Executed & synced to PiecesOS.");
-    } catch (e: any) {
-      alert("Error: " + (e.message || String(e)));
-    }
-  }
-
   async function scanScreenText() {
     try {
       const res = await AccessibilityScanner.getActiveScreenText();
@@ -343,28 +328,25 @@ export default function Status() {
             </div>
           </div>
 
-          {!toolkitEnabled && !contextEnabled && (
+          {!contextEnabled && (
             <p className="hint setup-note">
-              Screen context and the Shizuku toolkit are both off. Enable either in Setup.
+              Screen context is off. Enable it in Setup to capture on-screen text.
             </p>
-          )}
-
-          {toolkitEnabled && (
-            <div className="panel" style={{ marginTop: 20 }}>
-              <p className="panel-title">Shizuku Diagnostics</p>
-              <div className="chip-row">
-                {PRESET_COMMANDS.map(c => (
-                  <button key={c} className="chip" onClick={() => runPreset(c)}>
-                    {c}
-                  </button>
-                ))}
-              </div>
-            </div>
           )}
 
           {contextEnabled && (
             <div className="panel" style={{ marginTop: 20 }}>
               <p className="panel-title">Screen Context</p>
+              {!accessibilityGranted && (
+                <div className="card panel-danger" style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
+                  <p className="status-error" style={{ margin: 0, fontSize: 13 }}>
+                    ⚠️ Accessibility permission is inactive or was stopped by Android.
+                  </p>
+                  <button className="secondary" onClick={() => AccessibilityScanner.openAccessibilitySettings()}>
+                    Open Accessibility Settings
+                  </button>
+                </div>
+              )}
               <p className="hint" style={{ margin: 0 }}>
                 Screen-text capture only reads from apps you've explicitly allowed below.
               </p>

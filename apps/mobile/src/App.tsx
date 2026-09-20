@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { HashRouter, Routes, Route, Navigate } from "react-router";
 import Setup from "./pages/Setup";
 import Status from "./pages/Status";
@@ -7,15 +7,12 @@ import Recent from "./pages/Recent";
 import Search from "./pages/Search";
 import { flushUsageEvents } from "./lib/flush";
 import { triageQueue } from "./lib/triageQueue";
-import { isShizukuToolkitEnabled, isScreenContextEnabled, isNotificationCaptureEnabled } from "./lib/config";
+import { isScreenContextEnabled, isNotificationCaptureEnabled } from "./lib/config";
 import { startPassiveCaptureListener } from "./lib/passiveCapture";
 import { startNotificationCaptureListener } from "./lib/notificationCapture";
 import { runSmsBackfill } from "./lib/smsBackfill";
-import { registerPlugin, Capacitor } from "@capacitor/core";
+import { Capacitor } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
-
-const ShizukuMonitor = registerPlugin<any>('ShizukuMonitor');
-const AccessibilityScanner = registerPlugin<any>('AccessibilityScanner');
 
 const USAGE_FLUSH_INTERVAL_MS = 5 * 60 * 1000;
 
@@ -26,33 +23,7 @@ const USAGE_FLUSH_INTERVAL_MS = 5 * 60 * 1000;
 import Layout from "./components/Layout";
 
 export default function App() {
-  const [shizukuOffline, setShizukuOffline] = useState(false);
-
   useEffect(() => {
-    // Re-enable the accessibility service via Shizuku on launch only if it's
-    // not already enabled natively, and only for users who opted into Shizuku.
-    async function checkShizuku() {
-      const enabled = await isShizukuToolkitEnabled();
-      if (!enabled) return;
-
-      // If Accessibility is already active in Android Settings, Shizuku is optional.
-      try {
-        const acc = await AccessibilityScanner.isAccessibilityServiceEnabled();
-        if (acc?.enabled) return;
-      } catch {}
-
-      try {
-        const res = await ShizukuMonitor.checkPermission();
-        if (res.status !== "granted") {
-          setShizukuOffline(true);
-        } else {
-          await ShizukuMonitor.enableAccessibilityService();
-        }
-      } catch {
-        setShizukuOffline(true);
-      }
-    }
-    if (Capacitor.isNativePlatform()) checkShizuku();
 
     // Registered here (app-lifetime), not in Status.tsx (screen-lifetime) —
     // a listener tied to a screen's mount only receives events while that
@@ -119,14 +90,7 @@ export default function App() {
   return (
     <HashRouter>
       <Routes>
-        <Route
-          element={
-            <Layout
-              shizukuOffline={shizukuOffline}
-              onDismissShizuku={() => setShizukuOffline(false)}
-            />
-          }
-        >
+        <Route element={<Layout />}>
           <Route path="/" element={<Navigate to="/setup" replace />} />
           <Route path="/setup" element={<Setup />} />
           <Route path="/status" element={<Status />} />

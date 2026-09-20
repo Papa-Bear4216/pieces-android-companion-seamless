@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Pieces Companion</string>
-    <string name="title_activity_main">Pieces Android Companion</string>
+    <string name="app_name">Pieces-Android Companion - Seamless</string>
+    <string name="title_activity_main">Pieces-Android Companion - Seamless</string>
     <string name="accessibility_description">Allows Pieces OS to capture screen text for context-aware copilot features.</string>
     <string name="package_name">com.pieces.android.companion</string>
     <string name="custom_url_scheme">com.pieces.android.companion</string>
