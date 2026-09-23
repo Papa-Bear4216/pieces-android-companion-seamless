@@ -17,6 +17,14 @@ apps/mobile/android/local.properties
 **/.bearer-token*
 .gateway-token*
 **/.gateway-token*
+
+# never commit the Android release signing key or its passwords - this is a
+# permanent, irreplaceable identity; losing it or leaking it are both
+# unrecoverable in different ways (lose it = can never update the app again
+# under this identity; leak it = anyone can sign malicious updates as you)
+*.jks
+*.keystore
+apps/mobile/android/keystore.properties
 .aider*
 .claude/
 
