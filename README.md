@@ -54,6 +54,10 @@ docs/                ALLOWED_ROUTES.md (evidence log), ACCEPTANCE.md (test run r
 
 ## 1. Run the proxy (on the PC running PiecesOS)
 
+**Shortcut:** on Windows, `setup-plan-a.ps1` at the repo root does every step below in one
+shot (Node check, install, token generation, Scheduled Task registration, firewall rule).
+Right-click it → **Run as Administrator**. Safe to re-run. Skip to step 2 if you use it.
+
 ```bash
 cd apps/proxy
 npm install
