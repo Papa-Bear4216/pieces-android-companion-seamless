@@ -89,31 +89,68 @@ powershell.exe -ExecutionPolicy Bypass -File "apps\proxy\scripts\register-servic
 Find your PC's LAN IP (`ipconfig`, look for the IPv4 address on your home network
 adapter) — the phone will need `http://<that-ip>:8787` for Plan A (LAN) mode.
 
-## 2. (Optional) Set up Plan B — remote access via a remote host + Tailscale
+## 2. (Optional) Set up Plan B — remote access via a gateway + Tailscale
 
 Skip this section if LAN-only access is enough for you.
 
-Requirements: a Tailscale account (free tier is fine), and a Linux host reachable from the
-internet with Docker + Caddy already fronting at least one domain (this was built against
-an existing GCE VM that already ran Caddy for another service — adapt paths if yours
-differs).
+### Why a gateway is necessary
 
-1. **Join both machines to the same tailnet.** Install Tailscale on the PC running the
-   Plan A proxy and on your remote host, then `tailscale up --authkey=<key>` on each
-   (generate a reusable auth key at https://login.tailscale.com/admin/settings/keys).
-   Verify: from the remote host, `curl http://<pc-tailnet-ip>:8787/mobile/health` should
-   return `{"ok":true}` before proceeding — if it doesn't, nothing downstream will work.
+Plan A's proxy (`apps/proxy`) only listens on your home LAN. When your phone is off that
+Wi-Fi — on cellular, on another network, anywhere away from home — it has no route to it;
+your home router doesn't forward inbound ports here, by design (opening 8787 to the whole
+internet would mean the bearer token is the *only* thing standing between the public
+internet and PiecesOS).
 
-2. **Copy `apps/pieces-gateway` and `packages/allowlist`** to the remote host (matching
-   relative layout matters — the Dockerfile expects to be built with the repo root as
-   context, see the comment at the top of `apps/pieces-gateway/Dockerfile`).
+The gateway (`apps/pieces-gateway`) solves this by being a small relay that sits somewhere
+with a real reachable address — a cloud VM, a spare Linux box, anything with a public
+IP or a domain pointed at it — and bridges two networks that otherwise can't see each
+other:
 
-3. **Add a new service to your existing docker-compose.yml**, alongside whatever Caddy
-   already fronts — see `apps/pieces-gateway/deploy/docker-compose.snippet.yml` for the
-   exact block. Add `pieces-gateway` to Caddy's `depends_on` list too.
+- **Phone → gateway**: authenticated with its own per-device JWT (issued by `enroll-cli.ts`,
+  revocable by `revoke-cli.ts`). This is deliberately a *different* credential from the
+  Plan A bearer token, so a leaked/lost phone can be individually revoked without touching
+  the home proxy's token at all.
+- **Gateway → home proxy**: over Tailscale, addressed by the PC's *tailnet* IP (`100.x.x.x`),
+  not its LAN IP — the gateway isn't on your home network, so only the WireGuard tunnel
+  Tailscale sets up between the two machines can reach it. This hop reuses the same Plan A
+  bearer token as a second auth layer.
+- **Fails closed**: if the PC is asleep, logged out, or Tailscale is down, the gateway
+  returns an explicit `503` within its timeout window instead of hanging the phone
+  indefinitely.
 
-4. **Write a `.env` file** at `apps/pieces-gateway/.env` on the remote host (never commit
-   this):
+So: no inbound ports opened at home, a revocable identity per phone, and a clean signal
+when the home end is unreachable. The three tracks below differ only in *where the gateway
+process runs* — the gateway's own code and behavior (`apps/pieces-gateway/src/server.ts`)
+is identical in all three.
+
+All three tracks share the same first step:
+
+**Join both machines to the same tailnet.** Install Tailscale on the PC running the Plan A
+proxy and on whatever machine will run the gateway, then `tailscale up --authkey=<key>` on
+each (generate a reusable auth key at https://login.tailscale.com/admin/settings/keys).
+Verify: from the gateway machine, `curl http://<pc-tailnet-ip>:8787/mobile/health` should
+return `{"ok":true}` before proceeding — if it doesn't, nothing downstream will work.
+
+---
+
+### Track A — bare Linux host (no Docker)
+
+Any Linux box with a public IP (a cheap VPS, a spare machine, a cloud VM) and Node.js 20+.
+
+1. **Copy the code over** — `apps/pieces-gateway` and `packages/allowlist` (the gateway
+   imports the allowlist package by relative path, so keep the same folder layout under
+   some root directory on the host):
+   ```bash
+   rsync -av apps/pieces-gateway packages/allowlist user@host:/opt/pieces-android/apps-and-packages-parent/
+   ```
+
+2. **Install and build** on the host:
+   ```bash
+   cd /opt/pieces-android/.../pieces-gateway
+   npm install
+   ```
+
+3. **Write the environment file** (`apps/pieces-gateway/.env` — never commit this):
    ```
    GATEWAY_JWT_SECRET=<generate with: openssl rand -base64 32>
    HOME_PROXY_BASE_URL=http://<pc-tailnet-ip>:8787
@@ -121,27 +158,107 @@ differs).
    GATEWAY_PORT=8788
    ```
 
-5. **Add a DNS A record** for whatever subdomain you want (e.g. `pieces.yourdomain.com`)
-   pointing at the remote host's public IP, and a matching block in your Caddyfile:
+4. **Run it as a systemd service** so it survives reboots/crashes, e.g.
+   `/etc/systemd/system/pieces-gateway.service`:
+   ```ini
+   [Unit]
+   Description=Pieces Android Gateway
+   After=network-online.target tailscaled.service
+
+   [Service]
+   EnvironmentFile=/opt/pieces-android/.../pieces-gateway/apps/pieces-gateway/.env
+   WorkingDirectory=/opt/pieces-android/.../pieces-gateway/apps/pieces-gateway
+   ExecStart=/usr/bin/npx tsx src/server.ts
+   Restart=on-failure
+   User=piecesgw
+
+   [Install]
+   WantedBy=multi-user.target
+   ```
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now pieces-gateway
+   ```
+
+5. **Expose it.** The gateway listens on `0.0.0.0:8788` unencrypted — don't point a public
+   IP straight at that port. Either put it behind a reverse proxy for TLS (see Track C
+   below, it applies here too), or if you only need access over the tailnet itself (no
+   public domain at all), skip the reverse proxy entirely and give the phone
+   `http://<gateway-tailnet-ip>:8788` directly — only requires the phone to also be on
+   your tailnet (e.g. via the Tailscale Android app), trading "works from anywhere" for
+   "no public exposure at all."
+
+6. **Enroll a device**:
+   ```bash
+   cd apps/pieces-gateway && npm run enroll -- "My Phone"
+   ```
+   Prints a device token for the phone's Setup screen. Revoke later with
+   `npm run revoke -- <deviceId>` (find the ID with `npm run list-devices`).
+
+---
+
+### Track B — Windows PC (same machine as Plan A, or a second one)
+
+Same idea as Track A, running on Windows instead — useful if you'd rather not stand up a
+separate Linux box, or want to test the gateway alongside the Plan A proxy first.
+
+1. Ensure Node.js 20+ and Tailscale are installed on the PC.
+2. From the repo root:
+   ```powershell
+   cd apps\pieces-gateway
+   npm install
+   ```
+3. Create `apps\pieces-gateway\.env` with the same four variables as Track A step 3.
+4. **Register it as a Windows Scheduled Task**, the same pattern used for the Plan A proxy
+   (`apps/proxy/scripts/register-service.ps1`) — adapt that script's `ExecStart` equivalent
+   to run `npx tsx src\server.ts` from `apps\pieces-gateway`, S4U mode so it starts at boot
+   without a stored password. There's no ready-made `register-service.ps1` for the gateway
+   yet; copy and edit the proxy's script, pointing it at the gateway's folder and
+   `GATEWAY_PORT` (8788) instead.
+5. **Windows Firewall**: allow inbound TCP 8788 the same way `apps/proxy/scripts/windows-firewall-rule.ps1`
+   does for 8787 — adjust the port, and scope it to whatever profile matches how you're
+   exposing it (Private only if reachable solely over the tailnet; see the exposure note
+   in Track A step 5, it applies here unchanged).
+6. **Enroll a device**: `npm run enroll -- "My Phone"` from `apps\pieces-gateway`.
+
+Running the gateway on the same PC as the Plan A proxy is fine — `HOME_PROXY_BASE_URL` can
+even point at `http://127.0.0.1:8787` in that case instead of the tailnet IP, since they're
+on the same machine. You'd still want it reachable from outside (via Track C's reverse
+proxy, or Tailscale on your phone) — the tailnet hop is what lets it stay off the open
+internet either way.
+
+---
+
+### Track C — put a webserver (reverse proxy) in front
+
+Neither Track A nor B terminates TLS or gives you a real hostname on their own — the
+gateway just speaks plain HTTP on its own port. This track adds that layer, and works on
+top of either Track A or Track B without changing anything about the gateway itself.
+
+**Using Caddy** (automatic HTTPS via Let's Encrypt, minimal config):
+
+1. **Add a DNS A record** for whatever subdomain you want (e.g. `pieces.yourdomain.com`)
+   pointing at the host's public IP.
+2. **Caddyfile block:**
    ```
    pieces.yourdomain.com {
-       reverse_proxy pieces-gateway:8788
+       reverse_proxy localhost:8788
    }
    ```
-
-6. **Build and start it**: `docker compose up -d --build pieces-gateway`, then
-   `docker compose restart caddy` to pick up the new Caddyfile block. Watch
-   `docker logs <caddy-container>` for `certificate obtained successfully` for your new
+   (or `pieces-gateway:8788` if Caddy and the gateway are both Docker containers on the
+   same compose network — see `apps/pieces-gateway/deploy/docker-compose.snippet.yml` and
+   `apps/pieces-gateway/Dockerfile` for that variant, which is how this was originally
+   deployed against an existing Caddy+Docker host.)
+3. **Reload Caddy** (`caddy reload` on bare metal, or `docker compose restart caddy` in the
+   Docker variant) and watch its logs for `certificate obtained successfully` for the new
    hostname.
 
-7. **Enroll a device**:
-   ```bash
-   docker exec --env-file apps/pieces-gateway/.env <gateway-container> npx tsx src/enroll-cli.ts "My Phone"
-   ```
-   This prints a device token — that's what goes in the phone's Setup screen alongside
-   `https://pieces.yourdomain.com`.
+**Using nginx**, the equivalent is a `server` block with
+`proxy_pass http://127.0.0.1:8788;` plus `certbot --nginx` for TLS — omitted here since
+Caddy's automatic-HTTPS default needs far less config for this single-route case.
 
-To revoke a device later: `docker exec --env-file apps/pieces-gateway/.env <gateway-container> npx tsx src/revoke-cli.ts <deviceId>` (find the ID with `list-devices`).
+Once TLS is in front, the phone's Setup screen gets `https://pieces.yourdomain.com` as the
+server address, paired with whichever device token Track A/B's `enroll-cli` printed.
 
 ## 3. Install the APK on your phone
 
