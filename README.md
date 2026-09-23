@@ -298,18 +298,19 @@ first to confirm reachability, then saves both values via Capacitor's native Pre
 storage. Once saved, **Status**, **Ask**, and **Recent** all use the saved address + token
 automatically — switch between Plan A and Plan B any time by just changing Setup.
 
-> **Phone-side gotcha if you also have the Tailscale Android app installed:** the app
-> talks to the Plan B gateway over plain HTTPS and never touches the tailnet itself, so
-> Tailscale on the phone is not required. But if it's installed anyway (e.g. left over
-> from testing, or for the tailnet-only fallback), Android only allows one active VPN at
-> a time, and if Tailscale's **"Block connections without VPN"** setting is on, Android
-> silently blocks *all* other apps' network traffic — including this one — whenever
-> Tailscale itself isn't actively connected. This shows up as "PC not reachable" or a
-> failed health check that clears up the moment you open Tailscale and it reconnects,
-> which can look like a gateway/proxy problem when it isn't one. Fix: Settings → Network
-> & internet → VPN → gear icon next to Tailscale → turn off "Always-on VPN" / "Block
-> connections without VPN", or just disconnect/uninstall Tailscale on the phone if you're
-> not using the tailnet-only fallback from Track A.
+> **If your Plan B gateway hostname is a Tailscale Serve URL (`*.ts.net`), the phone MUST
+> be on the tailnet — this is not optional.** Serve (unlike Funnel) only resolves for
+> other tailnet members; it is not reachable from the open internet at all. If the
+> phone's Tailscale app is disconnected or offline, `https://<host>.<tailnet>.ts.net`
+> will fail to resolve/connect entirely — this is exactly what "PC not reachable" or a
+> failed health check usually means in that setup, and it clears the moment Tailscale on
+> the phone reconnects. Check `tailscale status` on any tailnet member to confirm the
+> phone shows as active, not `offline`. To stop this from recurring, enable Tailscale's
+> auto-connect/always-on option on the phone (Settings → Network & internet → VPN → gear
+> icon next to Tailscale → **Always-on VPN** on) so it reconnects automatically after a
+> reboot or network change instead of needing the app opened manually. If your gateway is
+> instead exposed via Tailscale Funnel or a real public domain (see Track C), the phone
+> does not need Tailscale at all — this only applies to a Serve-based `*.ts.net` URL.
 
 ## Optional: Mem0 integration
 
