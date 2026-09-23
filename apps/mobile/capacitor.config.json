@@ -1,6 +1,6 @@
 {
   "appId": "com.pieces.android.companion",
-  "appName": "Pieces Companion",
+  "appName": "Pieces-Android Companion - Seamless",
   "webDir": "dist",
   "server": {
     "androidScheme": "http"
