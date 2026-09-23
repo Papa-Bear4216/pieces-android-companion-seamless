@@ -13,31 +13,17 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-
-import rikka.shizuku.Shizuku;
-import rikka.shizuku.ShizukuRemoteProcess;
-
 /**
- * JS bridge for the notification listener (Part 1).
- *
- * Mirrors ShizukuMonitorPlugin's trust model: the privileged grant path
- * (enableViaShizuku) is gated on the same shizuku_toolkit_enabled flag, and
- * the capture master switch (setCaptureEnabled) is a separate explicit opt-in.
+ * JS bridge for the notification listener (Part 1). The capture master
+ * switch (setCaptureEnabled) is a separate explicit opt-in from the listener
+ * grant itself, which the user completes via the system settings screen
+ * (openSettings).
  */
 @CapacitorPlugin(name = "NotificationCapture")
 public class NotificationPlugin extends Plugin {
 
     static final String CAPTURE_ENABLED_KEY = "notification_capture_enabled";
     static final String CAPTURE_ALL_APPS_KEY = "notification_capture_all_apps";
-
-    private static final String SERVICE_COMPONENT =
-        "com.pieces.android.companion/com.pieces.android.companion.NotificationCaptureService";
-
-    private final ExecutorService executor = Executors.newSingleThreadExecutor();
 
     @Override
     public void load() {
@@ -97,51 +83,12 @@ public class NotificationPlugin extends Plugin {
         call.resolve(ret);
     }
 
-    /** Grant the listener via Shizuku, append-safe. */
-    @PluginMethod
-    public void enableViaShizuku(PluginCall call) {
-        if (!prefs().getBoolean("shizuku_toolkit_enabled", false)) {
-            call.reject("Shizuku toolkit is not enabled. Enable it in Setup first.");
-            return;
-        }
-        if (!Shizuku.pingBinder()) {
-            call.reject("Shizuku is not active. Start the Shizuku app daemon.");
-            return;
-        }
-        if (Shizuku.checkSelfPermission() != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            Shizuku.requestPermission(0);
-            call.reject("Shizuku permission requested. Please approve in the Shizuku app.");
-            return;
-        }
-        executor.execute(() -> {
-            try {
-                // `cmd notification allow_listener` is the modern, append-safe
-                // API (unlike settings put, which clobbers the whole list).
-                runShell("cmd notification allow_listener " + SERVICE_COMPONENT);
-                JSObject ret = new JSObject();
-                ret.put("status", "granted");
-                call.resolve(ret);
-            } catch (Exception ex) {
-                call.reject("Failed to grant notification listener: " + ex.getMessage());
-            }
-        });
-    }
-
-    /** Fallback: open the system settings screen for the user to toggle manually. */
+    /** Open the system settings screen for the user to grant the listener manually. */
     @PluginMethod
     public void openSettings(PluginCall call) {
         Intent intent = new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         getContext().startActivity(intent);
         call.resolve();
-    }
-
-    private String runShell(String command) throws Exception {
-        ShizukuRemoteProcess process = Shizuku.newProcess(new String[]{"sh", "-c", command}, null, null);
-        BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-        StringBuilder output = new StringBuilder();
-        String line;
-        while ((line = reader.readLine()) != null) output.append(line).append("\n");
-        return output.toString();
     }
 }

@@ -55,8 +55,6 @@ dependencies {
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')
-    implementation 'dev.rikka.shizuku:api:12.1.0'
-    implementation 'dev.rikka.shizuku:provider:12.1.0'
     // On-device Gemini Nano (AICore) for triaging captured screen text before
     // it's sent to PiecesOS — same dependency confirmed working in
     // bear-house-classic's OnDeviceGenAIPlugin.java.

@@ -14,7 +14,6 @@ const PROXY_BASE_URL_KEY = "pieces-android:proxyBaseUrl";
 const PROXY_TOKEN_KEY = "pieces-android:proxyToken";
 const REMOTE_GATEWAY_URL_KEY = "pieces-android:remoteGatewayUrl";
 const REMOTE_GATEWAY_TOKEN_KEY = "pieces-android:remoteGatewayToken";
-const SHIZUKU_ENABLED_KEY = "pieces-android:shizukuToolkitEnabled";
 const SCREEN_CONTEXT_ENABLED_KEY = "pieces-android:screenContextEnabled";
 const NOTIFICATION_CAPTURE_ENABLED_KEY = "pieces-android:notificationCaptureEnabled";
 const SMS_BACKFILL_HIGH_WATER_KEY = "pieces-android:smsBackfillHighWater";
@@ -85,23 +84,9 @@ export async function clearConfig(): Promise<void> {
   ]);
 }
 
-// Off by default. The Shizuku toolkit (privileged shell diagnostics + the
-// system-wide accessibility screen-text capture) is powerful enough that it
-// must be an explicit, informed opt-in — never auto-enabled just because the
-// Shizuku app happens to be installed and granted.
-export async function isShizukuToolkitEnabled(): Promise<boolean> {
-  const { value } = await Preferences.get({ key: SHIZUKU_ENABLED_KEY });
-  return value === "true";
-}
-
-export async function setShizukuToolkitEnabled(enabled: boolean): Promise<void> {
-  await Preferences.set({ key: SHIZUKU_ENABLED_KEY, value: String(enabled) });
-}
-
-// Independent of Shizuku. Screen-context capture only needs Android's
-// standard Accessibility Service permission — a manual one-time toggle in
-// system Settings, same mechanism screen readers and password managers use.
-// Off by default, same reasoning as the Shizuku toolkit: this is powerful
+// Screen-context capture only needs Android's standard Accessibility Service
+// permission — a manual one-time toggle in system Settings, same mechanism
+// screen readers and password managers use. Off by default: this is powerful
 // enough that it must be an explicit, informed opt-in.
 export async function isScreenContextEnabled(): Promise<boolean> {
   const { value } = await Preferences.get({ key: SCREEN_CONTEXT_ENABLED_KEY });

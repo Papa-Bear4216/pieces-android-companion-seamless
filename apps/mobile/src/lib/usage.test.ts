@@ -13,7 +13,7 @@ describe("usage queue management", () => {
   test("recordEvent adds an event with auto-generated id", async () => {
     await recordEvent({
       type: "search",
-      screen: "recent",
+      screen: "search",
       query: "movies",
       resultCount: 3,
       mode: "relevant",
@@ -37,7 +37,7 @@ describe("usage queue management", () => {
     await recordEvent({
       id: "event-2",
       type: "search",
-      screen: "recent",
+      screen: "search",
       query: "test",
       resultCount: 1,
       mode: "relevant",
@@ -59,7 +59,7 @@ describe("usage queue management", () => {
     const legacyQueue: UsageEvent[] = [
       {
         type: "search",
-        screen: "recent",
+        screen: "search",
         query: "Movie",
         resultCount: 5,
         mode: "relevant",
@@ -90,7 +90,7 @@ describe("usage queue management", () => {
   test("clearSentEvents prevents infinite replay loop for legacy events sent without ID", async () => {
     const rawLegacy: UsageEvent = {
       type: "search",
-      screen: "recent",
+      screen: "search",
       query: "Movie",
       resultCount: 5,
       mode: "relevant",

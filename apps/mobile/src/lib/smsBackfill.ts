@@ -49,12 +49,6 @@ export async function smsPermissionGranted(): Promise<boolean> {
   return (await smsPermissions()).sms;
 }
 
-/** Grant READ_SMS + READ_CONTACTS via Shizuku. Throws the native reject message on failure. */
-export async function grantSmsViaShizuku(): Promise<{ sms: boolean; contacts: boolean }> {
-  const r = await SmsReader.grantViaShizuku();
-  return { sms: !!r.granted, contacts: !!r.contactsGranted };
-}
-
 export async function openSmsAppSettings(): Promise<void> {
   await SmsReader.openAppSettings();
 }

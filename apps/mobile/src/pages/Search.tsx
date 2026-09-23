@@ -51,7 +51,7 @@ export default function Search() {
       setExpanded(null);
       recordEvent({
         type: "search",
-        screen: "recent",
+        screen: "search",
         query: trimmed,
         resultCount: result.hits.length,
         mode: result.mode === "text-fallback" ? "text-fallback" : "relevant",

@@ -10,7 +10,7 @@ const MAX_QUEUE_SIZE = 500; // backstop against unbounded growth if flush stays 
 
 export type UsageEvent = (
   | { type: "ask"; screen: "ask"; query: string; result: "answered" | "unavailable" | "error"; timestamp: string }
-  | { type: "search"; screen: "recent"; query: string; resultCount: number; mode: "relevant" | "text" | "text-fallback"; timestamp: string }
+  | { type: "search"; screen: "search"; query: string; resultCount: number; mode: "relevant" | "text" | "text-fallback"; timestamp: string }
   | { type: "screen_view"; screen: "setup" | "status" | "recent" | "ask"; timestamp: string }
   | { type: "setup_saved"; screen: "setup"; mode: "lan" | "remote"; timestamp: string }
   | {

@@ -26,9 +26,9 @@ import java.util.Deque;
  *    null listener = capture silently skipped.
  *
  * Enabling the listener itself is the OS grant
- * (enabled_notification_listeners) — done via Shizuku
- * (`cmd notification allow_listener <pkg>/<service>`) or the system settings
- * screen. This service does nothing until that grant exists AND the pref is on.
+ * (enabled_notification_listeners) — done via the system settings screen
+ * (NotificationPlugin.openSettings). This service does nothing until that
+ * grant exists AND the pref is on.
  */
 public class NotificationCaptureService extends NotificationListenerService {
 

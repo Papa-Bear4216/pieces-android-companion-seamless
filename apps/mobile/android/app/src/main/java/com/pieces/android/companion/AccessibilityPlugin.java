@@ -496,10 +496,9 @@ public class AccessibilityPlugin extends Plugin {
         call.resolve(ret);
     }
 
-    // Standalone path to enabling the Accessibility Service — no Shizuku
-    // required. Opens Android's own Accessibility Settings screen; the user
-    // finds "Pieces Android Companion" in the list and flips it on manually,
-    // same as enabling a screen reader or password-manager autofill service.
+    // Opens Android's own Accessibility Settings screen; the user finds
+    // "Pieces Android Companion" in the list and flips it on manually, same
+    // as enabling a screen reader or password-manager autofill service.
     @PluginMethod
     public void openAccessibilitySettings(PluginCall call) {
         Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);

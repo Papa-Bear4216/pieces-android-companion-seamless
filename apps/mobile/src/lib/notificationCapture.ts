@@ -78,11 +78,6 @@ export async function setNotificationCapture(enabled: boolean, allApps?: boolean
   await NotificationCapture.setCaptureEnabled({ enabled, ...(allApps !== undefined ? { allApps } : {}) });
 }
 
-/** Grant the listener via Shizuku. Throws with the native reject message on failure. */
-export async function grantNotificationListenerViaShizuku(): Promise<void> {
-  await NotificationCapture.enableViaShizuku();
-}
-
 export async function openNotificationListenerSettings(): Promise<void> {
   await NotificationCapture.openSettings();
 }

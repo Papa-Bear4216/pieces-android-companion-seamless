@@ -36,14 +36,6 @@
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
 
-        <provider
-            android:name="rikka.shizuku.ShizukuProvider"
-            android:authorities="${applicationId}.shizuku"
-            android:multiprocess="false"
-            android:enabled="true"
-            android:exported="true"
-            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
-
         <service
             android:name=".PiecesAccessibilityService"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
@@ -57,8 +49,8 @@
         </service>
 
         <!-- Part 1: system-wide notification listener. Granted via
-             `cmd notification allow_listener` (Shizuku) or the settings screen;
-             inert until granted AND notification_capture_enabled is on. -->
+             `cmd notification allow_listener` or the settings screen; inert
+             until granted AND notification_capture_enabled is on. -->
         <service
             android:name=".NotificationCaptureService"
             android:label="Pieces Notification Capture"
@@ -85,7 +77,6 @@
          "Scan to Connect" flow — declaring it here just makes it requestable. -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
-    <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
     <!-- Needed for AccessibilityScanner.listInstalledApps() (the app picker for
          screen-capture allowlisting) to see the full installed-app list on
          Android 11+, which restricts package visibility by default. -->
@@ -98,10 +89,11 @@
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
 
     <!-- Part 2: full SMS/MMS bodies + history backfill. Declared so they are
-         grantable; the actual grants are `pm grant <pkg> <perm>` via Shizuku
-         (SmsPlugin.grantViaShizuku) — no standard runtime dialog for a
-         non-default-SMS app. Inert until granted. READ_CONTACTS is for the
-         contact-allowlist picker (only messages from ticked contacts are captured). -->
+         grantable via the app details settings screen (SmsPlugin.openAppSettings)
+         or the Android 14+ restricted-settings flow — no standard runtime
+         dialog for a non-default-SMS app. Inert until granted. READ_CONTACTS
+         is for the contact-allowlist picker (only messages from ticked
+         contacts are captured). -->
     <uses-permission android:name="android.permission.READ_SMS" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
 </manifest>

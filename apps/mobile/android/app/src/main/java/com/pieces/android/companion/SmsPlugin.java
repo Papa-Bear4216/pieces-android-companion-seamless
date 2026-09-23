@@ -18,17 +18,12 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-
-import rikka.shizuku.Shizuku;
-import rikka.shizuku.ShizukuRemoteProcess;
 
 /**
  * Part 2 of the capture stack: full SMS bodies + backfill of existing history.
@@ -39,9 +34,11 @@ import rikka.shizuku.ShizukuRemoteProcess;
  * shortcodes, spam, and unknown numbers are excluded by default, and the user
  * opts in per contact rather than trying to enumerate everything to block.
  *
- * READ_SMS / READ_CONTACTS have no runtime dialog for a non-default-SMS app, so
- * grants are `pm grant <pkg> <perm>` via Shizuku. Everything here is inert until
- * READ_SMS exists; the contact picker additionally needs READ_CONTACTS.
+ * READ_SMS / READ_CONTACTS have no runtime dialog for a non-default-SMS app;
+ * the user grants them via the app details settings screen (openAppSettings)
+ * or, on Android 14+, the one-time restricted-settings flow. Everything here
+ * is inert until READ_SMS exists; the contact picker additionally needs
+ * READ_CONTACTS.
  */
 @CapacitorPlugin(name = "SmsReader")
 public class SmsPlugin extends Plugin {
@@ -60,38 +57,7 @@ public class SmsPlugin extends Plugin {
         call.resolve(ret);
     }
 
-    /** Grant READ_SMS + READ_CONTACTS via Shizuku. Gated on the toolkit flag. */
-    @PluginMethod
-    public void grantViaShizuku(PluginCall call) {
-        if (!isToolkitEnabled()) {
-            call.reject("Shizuku toolkit is not enabled. Enable it in Setup first.");
-            return;
-        }
-        if (!Shizuku.pingBinder()) {
-            call.reject("Shizuku is not active. Start the Shizuku app daemon.");
-            return;
-        }
-        if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
-            Shizuku.requestPermission(0);
-            call.reject("Shizuku permission requested. Please approve in the Shizuku app.");
-            return;
-        }
-        executor.execute(() -> {
-            try {
-                String pkg = getContext().getPackageName();
-                runShell("pm grant " + pkg + " android.permission.READ_SMS");
-                runShell("pm grant " + pkg + " android.permission.READ_CONTACTS");
-                JSObject ret = new JSObject();
-                ret.put("granted", granted());
-                ret.put("contactsGranted", contactsGranted());
-                call.resolve(ret);
-            } catch (Exception e) {
-                call.reject("Failed to grant permissions: " + e.getMessage());
-            }
-        });
-    }
-
-    /** Fallback: open app details settings screen for manual permission grants (no Shizuku needed). */
+    /** Open app details settings screen for manual permission grants. */
     @PluginMethod
     public void openAppSettings(PluginCall call) {
         Intent intent = new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
@@ -337,10 +303,6 @@ public class SmsPlugin extends Plugin {
             == PackageManager.PERMISSION_GRANTED;
     }
 
-    private boolean isToolkitEnabled() {
-        return prefs().getBoolean("shizuku_toolkit_enabled", false);
-    }
-
     private SharedPreferences prefs() {
         return getContext().getSharedPreferences(AccessibilityPlugin.PREFS_NAME, Context.MODE_PRIVATE);
     }
@@ -376,14 +338,5 @@ public class SmsPlugin extends Plugin {
         } catch (Exception ignored) {}
         contactCache.put(address, name);
         return name;
-    }
-
-    private String runShell(String command) throws Exception {
-        ShizukuRemoteProcess process = Shizuku.newProcess(new String[]{"sh", "-c", command}, null, null);
-        BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-        StringBuilder output = new StringBuilder();
-        String line;
-        while ((line = reader.readLine()) != null) output.append(line).append("\n");
-        return output.toString();
     }
 }

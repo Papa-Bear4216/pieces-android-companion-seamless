@@ -38,7 +38,7 @@ describe("Search page", () => {
     expect(within(cards[0]).getByText("On this device")).toBeTruthy();
     expect(within(cards[1]).getByText("From home PC")).toBeTruthy();
     expect(recordEvent).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "search", screen: "recent", query: "stuff", resultCount: 2, mode: "relevant" }),
+      expect.objectContaining({ type: "search", screen: "search", query: "stuff", resultCount: 2, mode: "relevant" }),
     );
   });
 

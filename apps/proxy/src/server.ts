@@ -46,9 +46,9 @@ async function pipeToRegistryApp(batch: TelemetryEvent[], packageName: string, a
       if (!isNaN(t0) && !isNaN(t1)) usageDurationMs = Math.max(0, Math.abs(t1 - t0));
     }
     const payload = {
-      collector: process.env.REGISTRY_COLLECTOR_TYPE || "shizuku",
-      sourceId: process.env.SHIZUKU_DEVICE_ID || "shizuku-companion-device",
-      sourceLabel: "Shizuku Monitor",
+      collector: process.env.REGISTRY_COLLECTOR_TYPE || "companion",
+      sourceId: process.env.COMPANION_DEVICE_ID || "pieces-companion-device",
+      sourceLabel: "Pieces Companion",
       rawLabel: appLabel || packageName,
       rawIdentity: packageName,
       idempotencyKey,
