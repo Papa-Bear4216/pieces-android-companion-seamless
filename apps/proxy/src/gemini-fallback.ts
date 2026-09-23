@@ -93,8 +93,16 @@ function callGeminiViaAgy(prompt: string): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile(
       AGY_PATH,
-      ["-p", prompt, "--model", "gemini-3.7-flash-low"],
-      { timeout: 45000, maxBuffer: 10 * 1024 * 1024 },
+      [
+        "-p",
+        prompt,
+        "--model",
+        "gemini-3.7-flash-low",
+        "--print-timeout",
+        "60s",
+        "--disable-slash-commands",
+      ],
+      { timeout: 75000, maxBuffer: 10 * 1024 * 1024 },
       (err, stdout, stderr) => {
         if (err) {
           console.error("[callGeminiViaAgy] error:", err, stderr);
