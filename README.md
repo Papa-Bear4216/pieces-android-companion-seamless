@@ -298,6 +298,19 @@ first to confirm reachability, then saves both values via Capacitor's native Pre
 storage. Once saved, **Status**, **Ask**, and **Recent** all use the saved address + token
 automatically — switch between Plan A and Plan B any time by just changing Setup.
 
+> **Phone-side gotcha if you also have the Tailscale Android app installed:** the app
+> talks to the Plan B gateway over plain HTTPS and never touches the tailnet itself, so
+> Tailscale on the phone is not required. But if it's installed anyway (e.g. left over
+> from testing, or for the tailnet-only fallback), Android only allows one active VPN at
+> a time, and if Tailscale's **"Block connections without VPN"** setting is on, Android
+> silently blocks *all* other apps' network traffic — including this one — whenever
+> Tailscale itself isn't actively connected. This shows up as "PC not reachable" or a
+> failed health check that clears up the moment you open Tailscale and it reconnects,
+> which can look like a gateway/proxy problem when it isn't one. Fix: Settings → Network
+> & internet → VPN → gear icon next to Tailscale → turn off "Always-on VPN" / "Block
+> connections without VPN", or just disconnect/uninstall Tailscale on the phone if you're
+> not using the tailnet-only fallback from Track A.
+
 ## Optional: Mem0 integration
 
 If you set `MEM0_API_KEY` in the proxy's environment, Ask queries and captured telemetry
