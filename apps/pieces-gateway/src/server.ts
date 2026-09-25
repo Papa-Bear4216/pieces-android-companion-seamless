@@ -145,16 +145,15 @@ const server = createServer(async (req, res) => {
 
   try {
     const target = new URL(url.pathname + url.search, HOME_PROXY_BASE_URL);
-    const upstreamReq: RequestInit = {
+    const upstreamReq: RequestInit & { duplex?: "half" } = {
       method,
       headers: { Authorization: `Bearer ${HOME_PROXY_TOKEN}` },
       signal: AbortSignal.timeout(upstreamTimeoutFor(method, url.pathname)),
     };
     if (isAsk || isUsageReport) {
-      upstreamReq.body = req;
+      upstreamReq.body = req as unknown as BodyInit;
       upstreamReq.headers = { ...upstreamReq.headers, "Content-Type": "application/json" };
       // Node.js native fetch requires duplex: 'half' when streaming a body.
-      // @ts-expect-error duplex is not properly typed in early TS node fetch definitions
       upstreamReq.duplex = "half";
     }
 

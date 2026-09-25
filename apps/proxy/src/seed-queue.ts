@@ -24,10 +24,28 @@ export class SeedQueue {
   private readonly queuePath: string;
   private readonly piecesBaseUrl: string;
   private draining = false;
+  private fileOperations: Promise<void> = Promise.resolve();
 
   constructor(queuePath: string, piecesBaseUrl: string) {
     this.queuePath = queuePath;
     this.piecesBaseUrl = piecesBaseUrl;
+  }
+
+  /**
+   * Serialize file read-modify-write cycles so a concurrent enqueue() can't
+   * clobber drain()'s final write (or vice versa) — both do readAll() then
+   * writeAll(), and without a lock the loser silently drops queue entries.
+   */
+  private async withFileLock<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.fileOperations;
+    let release!: () => void;
+    this.fileOperations = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
   }
 
   /**
@@ -38,6 +56,7 @@ export class SeedQueue {
    * a delayed flood rather than a prevented one.
    */
   async enqueue(bodyText: string, title: string, kind: "asset" | "workstream_event" = "asset"): Promise<void> {
+    await this.withFileLock(async () => {
     await mkdir(dirname(this.queuePath), { recursive: true });
     const hash = createHash("sha256").update(bodyText).digest("hex");
     const entries = await this.readAll();
@@ -51,6 +70,7 @@ export class SeedQueue {
     }
     const entry: PendingSeed = { kind, bodyText, title, queuedAt: new Date().toISOString(), attempts: 0 };
     await this.writeAll([...entries, entry]);
+    });
   }
 
   private async readAll(): Promise<PendingSeed[]> {
@@ -112,8 +132,15 @@ export class SeedQueue {
         }
       }
 
-      await this.writeAll(stillPending);
-      return { succeeded, remaining: stillPending.length, dropped };
+      const remaining = await this.withFileLock(async () => {
+        // Entries enqueued while the seed attempts above were in flight are
+        // appended at the end — merge them in instead of clobbering them.
+        const current = await this.readAll();
+        const pending = [...stillPending, ...current.slice(entries.length)];
+        await this.writeAll(pending);
+        return pending.length;
+      });
+      return { succeeded, remaining, dropped };
     } finally {
       this.draining = false;
     }
